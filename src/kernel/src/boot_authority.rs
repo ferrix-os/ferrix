@@ -166,6 +166,11 @@ pub(crate) fn seal() {
     {
         fatal!(catalog::FIRST_PROCESSES, "the seal: {why}");
     }
+    #[expect(
+        clippy::mem_forget,
+        reason = "AUDIT: the kernel pool's job is never given up: the seal draws on its promise for \
+                  the rest of the boot"
+    )]
     core::mem::forget(pool);
     fn report(_argument: usize) {
         loop {

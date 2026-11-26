@@ -82,7 +82,7 @@ pub fn check(promised: &Job, bare: &Job) -> Result<(), &'static str> {
         dealloc(frames, large);
         // SAFETY: (KMEM) the direct map's, so that its address reads after it is given back;
         // another's use of it is not this pattern.
-        unsafe { frames.cast::<u64>().read_volatile() == 0xA5A5_A5A5_A5A5_A5A5 }
+        unsafe { frames.cast::<[u8; 8]>().read_volatile() == [0xA5; 8] }
     });
     if kept {
         return Err("a retyped frame went back with its bytes");

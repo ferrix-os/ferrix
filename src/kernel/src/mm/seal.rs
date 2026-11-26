@@ -306,7 +306,7 @@ pub const fn arena_needed(archive_bytes: u64) -> u64 {
 
 /// The arena the programs of a boot run in beyond the root and the floor, measured
 /// (`docs/microkernel/K16.md` §4.1, R.5): the heaviest row, test-init under `fs=server` on
-/// x86_64, peaks at 14824 frames, so 1560 frames (about 6 MiB) of room.
+/// `x86_64`, peaks at 14824 frames, so 1560 frames (about 6 MiB) of room.
 pub(crate) const ARENA_WORKING_FRAMES: u64 = 64 << 20 >> 12;
 
 /// Whether an arena of `arena` frames is refused for a root of `archive_bytes`

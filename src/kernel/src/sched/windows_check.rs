@@ -427,6 +427,10 @@ fn spanning(first: u64, last: u64, end: u64) -> Option<usize> {
 /// The samples judged: `Err` for what fails in every boot (an arm past the window's end, a full
 /// log), and beside the figures the first broken rule of the stamps, which only a boot that
 /// measured itself clean judges (10241 T5, 10800 W4).
+#[expect(
+    clippy::too_many_lines,
+    reason = "the samples' rules in the order the stamps are read, each with its failure line"
+)]
 fn judge_samples() -> Result<(Judged, Option<&'static str>), &'static str> {
     let epoch = EPOCH.load(Ordering::Acquire);
     let mut found = Judged {
@@ -1119,12 +1123,12 @@ fn frame_on(held: usize, cpus: usize) -> Result<(), &'static str> {
             &[w(0, 0, MAJOR)]
         };
         for window in rows {
-            windows::set_window(&CHECK, cpu, *window).map_err(|why| why.says())?;
+            windows::set_window(&CHECK, cpu, *window).map_err(Refused::says)?;
         }
     }
     let epoch = crate::timer::now_nanos() + LEAD;
     EPOCH.store(epoch, Ordering::Release);
-    windows::install_check(&CHECK, held, MAJOR, epoch).map_err(|why| why.says())
+    windows::install_check(&CHECK, held, MAJOR, epoch).map_err(Refused::says)
 }
 
 fn asleep(held: usize) -> Result<[Arc<Task>; THREADS], &'static str> {
@@ -1316,6 +1320,10 @@ fn print_threads(judged: &Judged) {
 /// The sentence of the first rule broken.
 ///
 /// Verifies: H.SCHED.26, L.sched.153, L.sched.154, L.sched.155, L.sched.156, L.sched.163, L.sched.164, L.sched.165, L.sched.166, L.sched.167, L.sched.201
+#[expect(
+    clippy::too_many_lines,
+    reason = "the check's cases in the order the boot runs them, each id with its failure line"
+)]
 pub fn run() -> Result<alloc::string::String, &'static str> {
     let cpus = crate::smp::count();
     refusals(cpus)?;
@@ -1599,7 +1607,7 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     }
     let (worst, _) = windows::overruns();
     HELD.store(usize::MAX, Ordering::Release);
-    windows::uninstall_check(held).map_err(|why| why.says())?;
+    windows::uninstall_check(held).map_err(Refused::says)?;
     let unkicked = windows::unkicked() - unkicked;
     let arms = ARMS.load(Ordering::Acquire);
     judge_arms(arms)?;

@@ -109,7 +109,7 @@ pub fn assign(job: &Arc<Job>, partition: u8) -> Result<(), Refused> {
 ///
 /// [`Refused::Sealed`] for the boot's after its seal; the frame's own refusals.
 pub(crate) fn set_window(plan: &Plan, cpu: usize, window: Window) -> Result<(), Refused> {
-    if core::ptr::eq(plan, &BOOT) && sealed() {
+    if core::ptr::eq(plan, &raw const BOOT) && sealed() {
         return Err(Refused::Sealed);
     }
     frame::set_window(&mut *plan.rows.lock(), cpu, window).map_err(Refused::Frame)
@@ -151,7 +151,7 @@ fn in_service_word() -> u64 {
 fn check_rows(plan: &Plan, major_ns: u64) -> Result<(), Refused> {
     let rows = plan.rows.lock();
     frame::seal(&*rows, major_ns, in_service_word()).map_err(Refused::Frame)?;
-    if core::ptr::eq(plan, &BOOT) {
+    if core::ptr::eq(plan, &raw const BOOT) {
         let named = rows
             .iter()
             .flat_map(Row::windows)

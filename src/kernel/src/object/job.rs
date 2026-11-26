@@ -1034,6 +1034,10 @@ impl Job {
         #[cfg(ferrix_schedule = "windows")]
         {
             let _ = weight;
+            #[expect(
+                clippy::needless_return,
+                reason = "the fair class's half below is cfg'd out, so this is the end only here"
+            )]
             return false;
         }
         #[cfg(not(ferrix_schedule = "windows"))]
