@@ -109,7 +109,7 @@ values.off = { allows = ["none"], lands = "M0", built = "yes" }
 
 [flags.partition_speculation]
 why = "the barriers at a restricted exit (`exit`) or only at partition switches (`partition`); not applicable to a hybrid kernel"
-values.exit = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
+values.exit = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "yes", built_on = ["x86_64", "aarch64"], requires = ["personality=user"] }
 values.partition = { allows = ["sc2", "none"], lands = "M3", built = "yes", built_on = ["x86_64", "aarch64"], requires = ["personality=user"] }
 values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
@@ -120,7 +120,7 @@ values.on = { allows = ["sc2", "none"], lands = "M0", built = "yes" }
 
 [flags.restricted_fastpath]
 why = "K1's fast path for the restricted exit and re-entry; `on` selects code on x86-64 only, so an AArch64 image built `on` holds none and goes the general way; its levels are K1's review's to set, and until then `on` allows no certified level above sc2"
-values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
+values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "yes", built_on = ["x86_64", "aarch64"], requires = ["personality=user"] }
 values.on = { allows = ["sc2", "none"], lands = "M3", built = "yes", built_on = ["x86_64", "aarch64"], requires = ["personality=user"] }
 values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 
@@ -152,7 +152,7 @@ values.on_request = { allows = ["none"], lands = "M0", built = "stand-in", stand
 
 [flags.fault_ahead]
 why = "linuxd's fault brings neighbours with it: a file's resident pages, and on a walk fresh anonymous ones charged before they are touched. `max` keeps a job charged for what it touched (ledger 6537, A6)"
-values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
+values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "yes", built_on = ["x86_64", "aarch64"], requires = ["personality=user"] }
 values.on = { allows = ["sc2", "none"], lands = "M3", built = "yes", built_on = ["x86_64", "aarch64"], requires = ["personality=user"] }
 values.not_applicable = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes", conflicts = ["personality=user"] }
 

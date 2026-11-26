@@ -996,13 +996,9 @@ mod tests {
         (
             "max",
             "sc4",
-            &[
-                "partition_speculation=exit",
-                "restricted_fastpath=off",
-                "kernel_memory=retyped",
-                "schedule=windows",
-                "fault_ahead=off",
-            ],
+            // `exit`, `restricted_fastpath=off` and `fault_ahead=off` built since their flip
+            // (ledger 7016 B.4-B.6, 10144).
+            &["kernel_memory=retyped", "schedule=windows"],
         ),
     ];
 
