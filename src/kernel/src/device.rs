@@ -480,10 +480,8 @@ impl Reserved {
         }
         // The console the kernel brought up, whichever it is -- the command
         // line's, `console=`, the first UART -- as early boot mapped it.
-        #[cfg(ferrix_personality = "user")]
-        for (start, end) in crate::early::device_windows() {
-            reserved.add(start, end - start);
-        }
+        // CONTROL SIDE COMMIT (dm4-c11, ledger 10162 E3): the early windows'
+        // entry into Reserved taken out; gate.sh control takes out begin()'s.
         reserved
     }
 
