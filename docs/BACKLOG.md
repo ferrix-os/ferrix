@@ -698,20 +698,30 @@ log path and commit; a new sighting is added to its row the day it is seen.
 * K7's landing restores `quota::charging_own` around `write_ahead` and `fault_around`
   in `fill::resolve`: no ticket can be adopted before it, so the running group is right
   until then (6537, A3; 6590, item 1).
-* **`test-net`'s paced fetch under a user kernel, 1 run in 4 on `fast`'s flip (9ebe69358, ledger 7363, 7485 D.1): `fast` is refused on x86-64 until it is traced.**
-  `mkf3b-net2-x86`: `paced-fetch 143`, the restart program's `wget` got no byte in 60 s and `/tmp/paced`
-  was never made; `mkf3b-net3-x86` to `-net5-x86` and `present`'s `mkf3b-net-present` PASSED. Seen before
-  under `--personality user` (`mkf-s3-net`, `mkf2a-net-x86`, `mbl-g5e-net`), never traced. A next sighting
-  keeps the guest's serial log and the gateway's TCP counts; a flake here is a row, not a retry. Out:
-  a cause outside the user kernel (the gateway stub, the test's deadline) with a fix or a control, then
-  `test-net` PASSED on x86-64 under `fast`, and `x86_64` joins `personality=user`'s `built_on`; a cause
-  inside it is a code change with its own review. Log of the fourth: `mkf3b-net2-x86`'s serial.
-  **A lead (2026-11-26, sebastian-27b, ledger 10191 H6), closing nothing of this row:** the signature,
-  `paced-fetch 143` with `sh: can't open /tmp/paced: no such file`, appears every time linuxd's arena is
-  at its floor under `kernel_memory=retyped`: `n27b-f1-net583` at 583 MiB, and `n27b-f1-plant4` with the
-  arena eaten to 3000 frames, on 2b6fc8c58. Whether `fast`'s four x86-64 sightings stood at a floor is
-  not shown. Next step: the arena's free frames printed at such a sighting. `x86_64` stays out of
-  `personality=user`'s `built_on`.
+* ~~**`test-net`'s paced fetch under a user kernel**~~ **closed 2026-11-26** (sebastian-27c, ledger 10333,
+  after 7576; F-126). Cause: linuxd's bridge (`lift/core/bridge.rs`, `spawn_out`) ended its "port out" carrier on
+  the first bell a driver's kernel port refused as full (`SHOULD_WAIT`); no bell reached virtio-net again, and a
+  connection's SYN sat in the ring: wget's socket stayed in `SYN_SENT` for the whole 60 s and the gateway accepted
+  nothing until it was killed (trace build `sebastian-27c/paced` 786d6774a, never for develop, `n27c-p-1`), with
+  207,872 kB of 322,808 free. Signature, over the 113 test-net logs that ran the paced fetch: exactly one
+  `bridge   a bell refused: ShouldWait` in 13 of the 14 failures with `paced-fetch 143` and in none of the 94
+  passes; the exceptions are `vn-ctl-ended` and `vn3-ctl-ended` (controls that end a driver on purpose, 143 with
+  no bell) and `mkn603-pa`, `mkn603-pb` (the 2026-11-06 plant's own runs). Every sighting is on x86-64; none is
+  recorded on AArch64. Before, on develop ca78a9eea under `fast`'s values ad hoc, x86-64 KVM: 6 of 15 failed
+  (`n27c-p-1` to `-15`), each with the bell line, no pass with it. Fix: a bell refused as full is dropped, as the
+  hybrid's own rings drop it, and counted (M5-LIFT §11, the rule and why no wake is lost). After: 10 of 10 PASSED
+  (`n27c-f6-net-x86-1` to `-10`), five of them having dropped bells and gone on (`-1`, `-2` at least 4, `-8`, `-9`
+  at least 2, `-10` 1); AArch64 TCG under `fast` 3 of 3. Plant P (the first bell of each bridge refused):
+  `n27c-f6-pa-x86` PASSED with the drop printed; with the old `return` FIRED on x86-64 KVM and AArch64 TCG
+  (`-pb-x86`, `-pb-a64`), and the stand-in (`Ok(()) => return`) FIRED (`-stand-x86`). B's arena-floor lead
+  (ledger 10191 H6: `n27b-f1-net583`, `n27b-f1-plant4`) is the same defect: both printed the bell line. `x86_64`
+  joins `personality=user`'s `built_on` only by its own data-and-test commit and review (10333 P7).
+* The bridge's "port in" carrier (`lift/core/bridge.rs`, `spawn_in`) ends on a full local port, as "port out"
+  did before BACKLOG 603's fix (ledger 7576, 10333 P1): hold the packet and retry until the local port has
+  room, so that back-pressure reaches the driver's kernel port as `SHOULD_WAIT` does in the hybrid, with a
+  case; its own review. Reaches every core that exports a port to a driver (net, block, display, render,
+  input, audio); virtio-net's completion bell to its core's port is this side, `let _` on a refusal. Unowned: it
+  gets an owner before `x86_64` is asked into `personality=user`'s `built_on` (ledger 10333 P7, 10442).
 * ~~`fault_ahead`'s five controls of 6537, A7, on this tree, with L.object.314's tag~~ **done 2026-11-26**
   (sebastian-27c, ledger 10259): on develop under `--personality user --set fault_ahead=on`, x86-64 KVM and
   AArch64 TCG, `test-threads --smp 2` PASSED and every control FIRED (`n27c-fc-*` on 74f29e33c, first `n27c-fa-*` on de7f2378f): rights, the file's end shared

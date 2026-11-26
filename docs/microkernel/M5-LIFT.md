@@ -482,6 +482,27 @@ objects. `lift/core/bridge.rs` is the edge, a thread per direction:
   signal. Folded into K1 by 2f2f68b27's copy-miss (P1 to P6): linuxd passes `ENTER_COPY_MISS_EXITS` on its own entry, and a row and real init's negative control are this landing's (6529 Q5).
 * **A row's kill of a driver** (L9): `kill:<slot>` to a driver's `unbind`, compiled only
   with `FERRIX_ROW_DRIVER_KILL`. It shows a restart after a kill, not after a crash.
+* **A bell is idempotent** (ledger 7576, 10333 P1-P2; BACKLOG 603, F-126): a core's bell to a
+  driver's kernel port that the kernel refuses as full (`SHOULD_WAIT`) is dropped, and "port
+  out" goes on; any other refusal still ends it. The first drop of a bridge and each power of two
+  after it print `bridge   bells dropped on a full driver port: N`. The hybrid drops the same
+  bells: net-ring's `Serving::serve` (`extensions/device/net-ring/src/interfaces/net_ring/mod.rs`
+  730-732) and the block ring's driver bell (`personality/linux/src/interfaces/block_ring/mod.rs`
+  2240-2241), each `let _` on `queue_user`'s Full. **Why no wake is lost.** A full port has a
+  packet its driver has not taken, so the driver's next wait returns; and every driver a bell
+  reaches through the bridge looks at its ring after any wake, whatever the packet's key, before
+  it waits again. Only the net ring and the block ring queue on a driver's port (display's and
+  render's take a driver port and queue nothing on it; input's and audio's only check one is
+  there). The net drivers: `virtio-net` loops to `serve.turn` (`drivers/net/virtio-net/src/main.rs`
+  992), the whole ring, then `before_sleep` (1016), the ring's ask-to-be-rung and second look
+  (`ferrix-netring`'s `prepare_to_sleep`), before its one wait (1021); `rtl8169` (turn 1024,
+  `before_sleep` 1071, wait 1084) and `yt6801` (1012, 1057, 1070) the same. The block drivers
+  (`virtio-blk`, `ahci`, `nvme`, `stm32-sdmmc`) all run `ferrix_driver::block::run`, whose loop
+  (`native/driver/src/block.rs` 288-342) calls `before_sleep` (289), the ring's `prepare_to_sleep`
+  (`ferrix-blkserve` 391), which answers `Pending` and takes the submissions when any wait, before
+  every wait (296), a bell's key or not. No driver looks at its ring on its ring's key alone.
+  The other direction, a driver's packet to a full local port ("port in", `spawn_in`), still ends
+  its carrier: a BACKLOG row, hold and retry, its own review.
 
 ## 12. Rows and figures (2026-11-04, x86-64 KVM, tip of `feature/mk-lift`)
 
