@@ -809,6 +809,16 @@ does not give it. An integrator who does accepts that:
   detector and the chipset's TCO timer that would close that gap are not part of the element (§6.11:
   parked).
 
+
+### AoU-49 — firmware's word that a core needs no Spectre v2 workaround is true
+
+Under `max` a core with no `CSV2` and no firmware workaround stops the boot, unless the
+firmware answers `NOT_REQUIRED` for `SMCCC_ARCH_WORKAROUND_1` about that core
+([SPECULATION.md](SPECULATION.md) §4, ledger 10312 J2). The element cannot check that
+answer: the integrator shall run `max` only on firmware whose `NOT_REQUIRED` is true of
+the core it is asked about, and whose boot line "unaffected (firmware NOT_REQUIRED,
+AoU-49)" names it. A core unaffected by its own `CSV2` needs no such assumption.
+
 ### AoU-41 — a safety partition maps no pager-backed VMO it did not choose
 A pager-backed VMO (`docs/microkernel/K3.md`) has absent pages its pager
 supplies: a fault on one waits for that pager, up to the pager's bound of at

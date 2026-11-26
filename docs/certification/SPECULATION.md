@@ -425,6 +425,38 @@ stage 7's 18; the A55 and X1s issued none. The same boot with
 flag this replaced — failed FX-0307, *"a processor issued a switch barrier its
 plan does not have"*.
 
+**`max` stops on a processor its exit barrier does not cover** (ledger 10312 J1-J6,
+10522 (D), 10626; not built yet, BACKLOG's "`max` without IBPB"). Under `max`
+(`partition_speculation=exit`) a restricted exit decides a barrier, and each core is in
+exactly one of three states, decided by one pure function from what the core and its
+firmware said, the same on every boot:
+
+* **issues the barrier**: the core needs Spectre v2's workaround and firmware gives it
+  (`ARCH_WORKAROUND_1` answers that this core needs it; on x86-64, `IBPB` offered). That
+  the workaround firmware says it gives is given is firmware's, and AoU-11 carries it (the
+  integrator's firmware implements the workarounds it advertises);
+* **unaffected**: the core's own `CSV2` (`ID_AA64PFR0_EL1.CSV2` nonzero), which stands on
+  the core's own register on the metal; under a hypervisor the hypervisor answers that
+  register, and nothing in the element carries it: `max` is not claimed virtualised, and
+  running it so is open (no assumption carries it today). Or firmware's `NOT_REQUIRED` for
+  `ARCH_WORKAROUND_1` about this core, which is firmware's word and is carried by its own
+  assumption of use, **AoU-49**. Arm's list of unaffected cores (Cortex-A35, A53, A55) does not count for `max`:
+  it is a table of part numbers, untrusted under a hypervisor, and `max` takes no core on
+  its name alone;
+* **neither, or unknown**: everything else, firmware silent or answering
+  `NOT_SUPPORTED` included. Under `max` that core stops the boot by name, whatever the
+  level, before it runs a program.
+
+The state is decided for every core that comes up, from that core's own register and
+firmware's answer about that core; a machine whose cores are in different states stops if
+any one is in the third. The boot line says which state each kind of core is in and why ("issues the barrier",
+"unaffected (CSV2)", "unaffected (firmware NOT_REQUIRED, AoU-49)"). QEMU's default
+Cortex-A72 has no `CSV2` and its firmware offers no workaround, so a `max` image there
+stops; `max`'s AArch64 rows boot on QEMU's Neoverse N1 (`max.toml`'s `qemu_cpu`), which
+reads `CSV2`. **The model shows the decision's path, not any hardware's immunity:** that
+a real target core is unaffected or covered is M7's, on the target, against AoU-11 and
+AoU-49. Other profiles do not stop; they report, as today.
+
 Arm lists the Cortex-A57 and A72 as affected by variant 3a (a system register
 read speculatively); the kernel keeps no secret in a system register EL0 can
 name, and does nothing for it.
