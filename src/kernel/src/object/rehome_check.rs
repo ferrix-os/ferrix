@@ -24,7 +24,11 @@ use crate::object::quota::{self, Counter, Pending, Quota, Resource};
 use crate::user::space::{Access, AddressSpace};
 
 /// How many cases one run makes: the boot line's count.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 const CASES: u64 = 19;
+/// One more in ring 0 under `retyped`: its boot-sized tables (K16.9).
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+const CASES: u64 = 20;
 
 /// A nanosecond figure of a millisecond.
 const MS: u64 = 1_000_000;
@@ -58,6 +62,8 @@ pub fn run() -> Result<u64, &'static str> {
     check_may_start_in()?;
     check_sealed_tree()?;
     check_a_reaped_pid_finds_nothing()?;
+    #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+    check_the_tables_are_their_boot_size()?;
     Ok(CASES)
 }
 
@@ -667,6 +673,66 @@ fn check_a_reaped_pid_finds_nothing() -> Result<(), &'static str> {
     drop(host);
     if !process::is_free(pid) {
         return Err("a dropped process's pid was not free");
+    }
+    Ok(())
+}
+
+/// Ring 0's growing globals under `kernel_memory=retyped` are their boot size and refuse the
+/// one past it through the real calls (K16.9, ledger 10505, 10548 Z1 (a), 10576): the pid
+/// table holds [`process::FIXED_TASKS`] and the next number is refused, the quota table
+/// [`FIXED_JOBS`] and the next job is refused, the address-wait table is one bucket of as many
+/// waiters as tasks, so a waiter past it is unreachable (waiters are tasks). What does not grow
+/// after the seal is held statically: their growing paths are not built (check-kernel-shape).
+///
+/// Verifies: L.object.339
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn check_the_tables_are_their_boot_size() -> Result<(), &'static str> {
+    use crate::object::quota::{FIXED_JOBS, fixed_slots};
+    use crate::user::address_wait::{BUCKET_COUNT, FIXED_WAITERS, bucket_room};
+    if process::fixed_entries() != process::FIXED_TASKS || fixed_slots() != FIXED_JOBS {
+        return Err("a boot-sized table grew");
+    }
+    if BUCKET_COUNT != 1 || bucket_room(0).1 != FIXED_WAITERS {
+        return Err("a boot-sized table grew: the address waits'");
+    }
+    if FIXED_WAITERS != process::FIXED_TASKS {
+        return Err("the address waits' table holds fewer waiters than there may be tasks");
+    }
+    // The pid table: every number it has room for, then one more, refused.
+    let mut numbers: alloc::vec::Vec<u32> = alloc::vec::Vec::new();
+    crate::fallible::try_reserve(&mut numbers, process::FIXED_TASKS)
+        .map_err(|_| "no memory for the pid table's case")?;
+    while let Some(number) = process::allocate() {
+        if crate::fallible::push_within(&mut numbers, number).is_err() {
+            process::release(number);
+            for number in numbers.drain(..) {
+                process::release(number);
+            }
+            return Err("the pid table took more numbers than its size");
+        }
+    }
+    let refused_full = !numbers.is_empty();
+    let again = numbers.pop().inspect(|&number| process::release(number));
+    let reused = again.and_then(|_| process::allocate());
+    for number in numbers.drain(..).chain(reused) {
+        process::release(number);
+    }
+    if !refused_full || reused.is_none() {
+        return Err("the pid table refused a number while it had room");
+    }
+    // The quota table: jobs until one is refused, no more than its size.
+    let (_root, parent) = fresh()?;
+    let mut jobs: alloc::vec::Vec<Arc<Job>> = alloc::vec::Vec::new();
+    crate::fallible::try_reserve(&mut jobs, FIXED_JOBS)
+        .map_err(|_| "no memory for the quota table's case")?;
+    while let Ok(job) = parent.new_child() {
+        if crate::fallible::push_within(&mut jobs, job).is_err() {
+            return Err("the quota table took more jobs than its size");
+        }
+    }
+    drop(jobs);
+    if parent.new_child().is_err() {
+        return Err("the quota table refused a job while it had room");
     }
     Ok(())
 }
