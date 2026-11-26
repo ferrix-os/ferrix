@@ -106,7 +106,7 @@ fn chain_is_the_tasks_own() -> Result<Report, &'static str> {
         if crate::timer::now_nanos() > deadline {
             break None;
         }
-        super::yield_now();
+        super::give_way();
     };
     RELEASE.store(true, Ordering::Release);
     HOLD.wake_all();

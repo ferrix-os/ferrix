@@ -199,7 +199,7 @@ fn release_when_parked(_argument: usize) {
             PARKED_CLAIMS.release(&node);
             return;
         }
-        sched::yield_now();
+        sched::give_way();
     }
 }
 

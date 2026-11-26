@@ -126,7 +126,7 @@ pub fn run() -> Result<Report, &'static str> {
         .take()
         .ok_or("the timer checks never finished")?;
     while !task.is_dead() {
-        sched::yield_now();
+        sched::give_way();
     }
     let mut report = outcome?;
     arms_leave_a_processor_going_out_of_service(&mut report)?;
@@ -280,7 +280,7 @@ fn arms_leave_a_processor_going_out_of_service(report: &mut Report) -> Result<()
         .take()
         .unwrap_or(Err("the pinned task said nothing"))?;
     while !setter.is_dead() {
-        sched::yield_now();
+        sched::give_way();
     }
     let (Some(busy), Some(cancelled), Some(again)) =
         (set.busy.take(), set.cancelled.take(), set.again.take())
@@ -883,7 +883,7 @@ fn check_an_early_wake_takes_out_only_its_own_entry() -> Result<(), &'static str
         if crate::timer::now_nanos() >= patience {
             return Err("a sleeping task was never filed beside the timers");
         }
-        sched::yield_now();
+        sched::give_way();
     }
     // Read just around the wake, whose removal is synchronous: one entry,
     // the task's, leaves.
@@ -900,7 +900,7 @@ fn check_an_early_wake_takes_out_only_its_own_entry() -> Result<(), &'static str
         if crate::timer::now_nanos() >= patience {
             return Err("a sleeping task woken early never woke");
         }
-        sched::yield_now();
+        sched::give_way();
     }
     if before.checked_sub(after) != Some(1)
         || task.filed_at() != 0

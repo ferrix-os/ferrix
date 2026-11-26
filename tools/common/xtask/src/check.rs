@@ -376,6 +376,14 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
             &["tools/common/check/check-xsave-sites.py", "--self-test"],
         ],
     ),
+    (
+        "yield sites under windows",
+        &[
+            // Every yield_now K9 §4.1 answers (ledger 7562 WZ.5, WZ.6, 10087 A2).
+            &["tools/common/check/check-yield-sites.py"],
+            &["tools/common/check/check-yield-sites.py", "--self-test"],
+        ],
+    ),
     // K1's ASIDs: a hit is safe only while every shootdown reaches every tag.
     (
         "AArch64 TLB invalidations",

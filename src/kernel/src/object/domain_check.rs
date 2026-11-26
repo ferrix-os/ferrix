@@ -696,7 +696,7 @@ fn park_elsewhere(
             RELEASED.store(true, Ordering::Release);
             return Err("case 8: the task parked in the leaver's space never ran");
         }
-        crate::sched::yield_now();
+        crate::sched::give_way();
     }
     Ok(Some((task, other)))
 }
@@ -856,7 +856,7 @@ fn check_recorded_after_the_scan(
             RELEASED.store(true, Ordering::SeqCst);
             return Err("case 11: the task on the other processor never ran");
         }
-        crate::sched::yield_now();
+        crate::sched::give_way();
     }
     if arch::last_domain_on(other) != 0 {
         RELEASED.store(true, Ordering::SeqCst);
@@ -1053,7 +1053,7 @@ fn check_forget_racing_an_install(
         if crate::timer::now_nanos() > deadline {
             return Err("case 12: the task on the other processor never ran");
         }
-        crate::sched::yield_now();
+        crate::sched::give_way();
     }
     crate::sched::wait_until_gone(&first, PATIENCE_NANOS)?;
     if arch::last_domain_on(other) != marked.domain() {

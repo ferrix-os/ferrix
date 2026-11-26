@@ -3022,7 +3022,7 @@ checks above is `pub` for raised checks (F3).
 | `drained` | fn | load |  |
 | `evacuate_with_fired_for_check` | fn | load (checks) | checks-only |
 | `exit_leaving` | fn | load |  |
-| `give_way` | fn | item (checks) | checks-only |
+| `give_way` | fn | item, load (checks) | checks-only |
 | `holds_arm_on` | fn | load (checks) | checks-only |
 | `in_call_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |

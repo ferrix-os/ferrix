@@ -884,7 +884,7 @@ pub fn migrating_shootdown(topology: &Topology) -> Result<Option<(usize, usize)>
         if crate::timer::now_nanos() > deadline {
             return Err("a task of the migration check never gave its stack back");
         }
-        crate::sched::yield_now();
+        crate::sched::give_way();
     }
     Ok(Some((left, moved_to)))
 }

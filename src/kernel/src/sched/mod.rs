@@ -3604,7 +3604,7 @@ fn wait_for_reaper(patience_nanos: u64) -> Result<(), &'static str> {
         if crate::timer::now_nanos() >= deadline {
             return Err("the reaper never went quiet before the frame count");
         }
-        yield_now();
+        give_way();
     }
 }
 

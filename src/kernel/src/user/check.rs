@@ -1944,7 +1944,7 @@ fn wait_until(mut ready: impl FnMut() -> bool, what: &'static str) -> Result<(),
         if crate::timer::now_nanos() >= deadline {
             return Err(what);
         }
-        crate::sched::yield_now();
+        crate::sched::give_way();
     }
     Ok(())
 }
@@ -2008,7 +2008,7 @@ fn reap_until(allocations: usize) -> Result<(), &'static str> {
         if crate::timer::now_nanos() >= deadline {
             return Err("a task in an address space never gave its stack back");
         }
-        crate::sched::yield_now();
+        crate::sched::give_way();
     }
 }
 

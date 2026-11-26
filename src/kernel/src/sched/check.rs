@@ -725,7 +725,7 @@ fn reap_to(allocations: usize, what: &str) -> Result<(), &'static str> {
             );
             return Err("a task's stack was never given back");
         }
-        super::yield_now();
+        super::give_way();
     }
 }
 
@@ -1385,7 +1385,7 @@ fn a_reaper_without_memory_frees_one_at_a_time(topology: &Topology) -> Result<()
         if crate::timer::now_nanos() >= deadline {
             return Err("a task holding a processor for the reaper check never ended");
         }
-        super::yield_now();
+        super::give_way();
     }
     drop(holders);
     let (reaped, failed) = outcome?;
@@ -1441,7 +1441,7 @@ fn the_dead_are_freed_with_no_processor_idle(topology: &Topology) -> Result<(), 
         if crate::timer::now_nanos() >= deadline {
             return Err("a task holding a processor for the busy-reaper check never ended");
         }
-        super::yield_now();
+        super::give_way();
     }
     drop(holders);
     let most = outcome?;
@@ -1467,7 +1467,7 @@ fn end_while_held(here: usize, holders: u64) -> Result<usize, &'static str> {
         if crate::timer::now_nanos() >= deadline {
             return Err("a task holding a processor for the busy-reaper check never started");
         }
-        super::yield_now();
+        super::give_way();
     }
     let mut most = 0;
     for made in 1..=ENDING_TASKS {
@@ -1484,7 +1484,7 @@ fn end_while_held(here: usize, holders: u64) -> Result<usize, &'static str> {
             if crate::timer::now_nanos() >= deadline {
                 return Err("a task of the busy-reaper check never ran");
             }
-            super::yield_now();
+            super::give_way();
         }
         most = most.max(super::zombies_waiting());
     }
@@ -1513,7 +1513,7 @@ fn reap_while_held(me: &Task, here: usize, holders: u64) -> Result<(usize, u64),
         if crate::timer::now_nanos() >= deadline {
             return Err("a task holding a processor for the reaper check never started");
         }
-        super::yield_now();
+        super::give_way();
     }
     DONE.store(0, Ordering::Release);
     let first = super::spawn_on(
@@ -1540,7 +1540,7 @@ fn reap_while_held(me: &Task, here: usize, holders: u64) -> Result<(usize, u64),
         if crate::timer::now_nanos() >= deadline {
             return Err("two tasks for the reaper never reached it");
         }
-        super::yield_now();
+        super::give_way();
     }
     drop((first, second));
     crate::fallible::inject(me.id, 1);
@@ -2552,7 +2552,7 @@ fn check_a_last_drop_where_sleeping_is_forbidden() -> Result<(), &'static str> {
             return Err("the last-drop case's task was not reaped");
         }
         let _ = super::reap();
-        super::yield_now();
+        super::give_way();
     }
     let (before, finished_before) = super::leftovers::counts();
     let saved = <crate::arch::Irq as IrqControl>::disable();
@@ -2573,7 +2573,7 @@ fn check_a_last_drop_where_sleeping_is_forbidden() -> Result<(), &'static str> {
         if crate::timer::now_nanos() > deadline {
             return Err("the reaper did not finish a task's last drop in time");
         }
-        super::yield_now();
+        super::give_way();
     }
     Ok(())
 }

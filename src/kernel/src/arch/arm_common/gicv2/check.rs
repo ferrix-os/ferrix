@@ -221,7 +221,7 @@ fn wait_until(yielding: bool, ready: impl Fn() -> bool) -> bool {
             return false;
         }
         if yielding {
-            crate::sched::yield_now();
+            crate::sched::give_way();
         } else {
             core::hint::spin_loop();
         }

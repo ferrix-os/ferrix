@@ -465,7 +465,7 @@ fn lines_whole_while_written() -> Result<(u64, usize), &'static str> {
         }
         // On one processor the writer runs only when this task lets it.
         if reader == writer {
-            crate::sched::yield_now();
+            crate::sched::give_way();
         }
     }
     if whole == 0 {
