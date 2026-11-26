@@ -17,7 +17,8 @@
 //! demand-paged access from a wild pointer. So the copy asks
 //! [`AddressSpace::fault`] first, deliberately, and a page that cannot be
 //! faulted in is [`UserError::Fault`] — a clean `EFAULT` to the program rather
-//! than a kernel fault.
+//! than a kernel fault — or [`UserError::NoMemory`] when what it lacked was a
+//! frame.
 //!
 //! **The address may not be the program's.** Nothing stops a program passing
 //! a kernel address as a buffer, and nothing in the *hardware* stops the
@@ -64,6 +65,7 @@ use ferrix_errno::Errno;
 use crate::arch;
 
 use crate::user::space::{Access, AddressSpace, SpaceError};
+use crate::user::vmo::VmoError;
 
 /// Why a copy to or from user memory failed.
 ///
@@ -76,9 +78,13 @@ pub enum UserError {
     NotUserRange,
     /// The range is so long that its end cannot be computed.
     Overflow,
-    /// The page is not mapped, is not writable, or could not be faulted in.
+    /// The page is not mapped, is not writable, or could not be faulted in
+    /// for any reason but memory.
     Fault,
-    /// There was no memory to copy into.
+    /// There was no memory to copy into: a buffer of the kernel's, or a frame
+    /// for the page that faulting it in needed (the space's
+    /// [`SpaceError::OutOfMemory`], or its backing object's), refused by the
+    /// allocator, a job's limit or its reservation.
     NoMemory,
     /// The copy consumed poison: a machine check stopped it at the page,
     /// which is retired at the call's way out (`docs/MACHINE-CHECK-COPY.md`
@@ -87,9 +93,24 @@ pub enum UserError {
 }
 
 impl From<SpaceError> for UserError {
-    /// Everything the address space can refuse is `EFAULT` to a program.
-    fn from(_: SpaceError) -> Self {
-        UserError::Fault
+    /// A refusal for want of memory is [`UserError::NoMemory`]; everything
+    /// else the address space can refuse is [`UserError::Fault`]. What a
+    /// program learns is its caller's to say, `EFAULT` for both at most
+    /// callers; the two stay apart so that the kernel's own account of a
+    /// failed copy names the cause. Under `kernel_memory=retyped` an exec's
+    /// segment copy refused at linuxd's arena's floor read as
+    /// `Load(Copy(Fault))` on every command (ledger 6956 SX.2, 7011 R.2).
+    ///
+    /// `user::edge_check`'s copy case holds every variant of both enums to an
+    /// answer with no wildcard, so a refusal added to either fails every build
+    /// of the checks until someone says which it is (ledger 10191 H1).
+    fn from(error: SpaceError) -> Self {
+        match error {
+            SpaceError::OutOfMemory | SpaceError::Backing(VmoError::OutOfMemory) => {
+                UserError::NoMemory
+            }
+            _ => UserError::Fault,
+        }
     }
 }
 

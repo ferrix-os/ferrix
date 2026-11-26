@@ -22,6 +22,7 @@ use crate::object::quota::{self, DEFAULT_WEIGHT, MAX_WEIGHT, MIN_WEIGHT, Resourc
 use crate::sched::{self, Task};
 use crate::syscall::process::{self, Process};
 use crate::syscall::registry;
+use crate::syscall::uaccess::{self, UserError};
 use crate::user::space::{Access, AddressSpace};
 
 /// What the checks saw, for the boot line.
@@ -205,7 +206,11 @@ fn fork(parent: &Arc<Process>) -> Result<Arc<Process>, &'static str> {
 /// memory limit, pages and page tables together, while a sibling's faults go
 /// on; and every frame comes back as the spaces go.
 ///
-/// Verifies: H.QUOTA.2, L.mm.8, L.object.55, L.user.99
+/// A copy into the first page refused, made as a task of that job, answers
+/// `NoMemory`, and one to an address the space never mapped answers `Fault`:
+/// a refusal for memory is told apart from a bad address (ledger 7011 R.2).
+///
+/// Verifies: H.QUOTA.2, L.mm.8, L.object.55, L.user.99, L.object.342
 fn check_memory(tree: &Arc<Job>, report: &mut Report) -> Result<(), &'static str> {
     const LIMIT: u64 = 48;
     const BASE: u64 = 0x40_0000;
@@ -234,6 +239,18 @@ fn check_memory(tree: &Arc<Job>, report: &mut Report) -> Result<(), &'static str
     report.pages = pages(&hog);
     report.tables = report.pages.saturating_sub(faulted);
     report.heap = used(&hog, Resource::Kernel);
+    // L.object.342: the copy that meets the limit says so. Taken after the counts
+    // above, which a refused copy's own refused fault would not move.
+    let refused_at = BASE + faulted * PAGE_SIZE;
+    let (at_limit, _) = as_task_of(&hog, || uaccess::copy_to_user(&space, refused_at, &[1]));
+    if at_limit != Err(UserError::NoMemory) {
+        return Err("a copy refused at its job's memory limit did not answer NoMemory");
+    }
+    let unmapped = BASE + (LIMIT + 8) * PAGE_SIZE;
+    let (outside, _) = as_task_of(&hog, || uaccess::copy_to_user(&space, unmapped, &[1]));
+    if outside != Err(UserError::Fault) {
+        return Err("a copy to an address never mapped did not answer Fault");
+    }
 
     let (other, _) = as_task_of(&sibling, || fault_in(BASE, LIMIT));
     let (other, other_space) = other?;

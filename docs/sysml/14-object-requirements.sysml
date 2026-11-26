@@ -4153,6 +4153,15 @@ package FerrixObjectRequirements {
             attribute :>> unit = "mm::ReservedPages::deallocate_pages";
             attribute :>> scope = "kernel_memory=retyped";
         }
+        requirement <'L.object.342'> aCopyRefusedForMemorySaysSo : ItemLowLevel {
+            attribute :>> statement = "A copy into a program's memory whose page could not be faulted in for want of a
+                frame shall answer NoMemory, and one to an address its space never mapped shall answer Fault.";
+            attribute :>> criterion = "user::edge_check's copy case: every variant of SpaceError and of VmoError, each named
+                with no wildcard in the mapping, answers NoMemory for want of a frame and Fault otherwise, and a copy to an address never mapped reads Fault; object::quota_check's memory
+                case: a copy as a task of a job at its memory limit, into the first page refused, reads NoMemory.";
+            attribute :>> parent = "H.QUOTA.2";
+            attribute :>> unit = "syscall::uaccess::UserError::from";
+        }
         requirement <'L.object.346'> aFurtherPartitionHoldsItsRow : ItemLowLevel {
             attribute :>> statement = "A further Linux partition shall be started in a job and a region of its own with the
                 FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.";

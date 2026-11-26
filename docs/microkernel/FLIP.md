@@ -31,7 +31,7 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | `max` | `fault_ahead=off` | `yes`, x86-64 and AArch64 | | Flipped (ledger 10144 X7), rows ad hoc, below. B.6's off half as amended by 10144 X7, which withdraws "the walk's control silent": `test-threads --smp 2` and `test-container` PASSED under `off` on x86-64 KVM and AArch64 TCG; nm by the gate: `fault_around`, `write_ahead` out of `linuxd` in the development and release builds on both, in under `on`, the plant (build.rs giving linuxd `on`) FIRED on both. The walk control was dead under `on` as well, `on`'s, F-122, closed since |
 | `fast` | `schedule=edf` | `yes`, x86-64 and AArch64 | | Flipped at 9ebe69358: `test-flags` both, AArch64's `test-shell`, `test-threads --smp 2` PASSED; `test-kernel-symbols` re-read (`mkf3b-sym-*-present`). The fast path's decline on a channel: case 197, `restricted-check`, with its control. nm: `ferrix_sched_edf` in under `edf`, out under `fair`. `G.1`'s generic set over all three tiers with `windows` |
 | `max` | `schedule=windows` | `no` | no code | S.1, S.2, S.3, S.6: `ferrix-sched-windows`, fixed priorities inside windows (C6), no task on a fair run queue (C3) |
-| `max` | `kernel_memory=retyped` | `adhoc` | `Load(Copy(Fault))` unexplained; K16.5, K16.7, K16.9, F.8 | R.1 to R.5 |
+| `max` | `kernel_memory=retyped` | `adhoc` | the arena's sizing (`Load(Copy(Fault))` traced to it and answering `NoMemory` now, ledger 10111); K16.5, K16.7, K16.9, F.8; every row so far x86-64, and `max` claims AArch64 | R.1, R.3 to R.5; R.2 closed by cause (K16.md, `n27b-diag640c`) |
 
 ## What refuses them after every value is `built`
 
@@ -54,7 +54,7 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | BACKLOG 343, 344 | `KERNEL_JOBS`, `DEBUG_WRITE` | M5's flip |
 | BACKLOG 415 | K14's certified list has no writer | the profile builds (LV.3) |
 | BACKLOG 423 | netd's network row, N.7 | netd entering a profile, M5's flip |
-| BACKLOG 426 | `Load(Copy(Fault))` under retyped | `built` of `retyped` (R.2) |
+| BACKLOG 426 | `Load(Copy(Fault))` under retyped: traced, the arena's sizing, which stays open (ledger 10111) | `built` of `retyped` (R.2 by cause; the sizing R.5) |
 | BACKLOG 428 | a real device's write outside its domain, SH.2 | M5's flip |
 | BACKLOG 429, 436 | K16.5, K16.9, F.8 | `built` of `retyped` (R.1); K16.2 to M7 (R.4) |
 | BACKLOG 436 | K16.7 | the refusal by name for `built`, the rest to M7 (R.3) |

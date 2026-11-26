@@ -20,6 +20,7 @@ use ferrix_vma::VmaFlags;
 
 use crate::mm;
 use crate::smp;
+use crate::syscall::uaccess::{self, UserError};
 use crate::user::space::{
     Access, AddressSpace, Destination, FileMapping, FilePlace, SpaceError, WindowPages,
 };
@@ -53,6 +54,7 @@ pub(crate) fn run() -> Result<u32, &'static str> {
     check_frame_runs_and_splits()?;
     check_a_window_settles_while_frames_move()?;
     refused += check_kernel_arena_refusals()?;
+    refused += check_a_copy_says_why(&space)?;
     Ok(refused)
 }
 
@@ -74,6 +76,72 @@ fn expect<T>(
     } else {
         Err(what)
     }
+}
+
+/// What a copy into a program's memory answers for each refusal the space can
+/// make, said here with no wildcard over `SpaceError` and `VmoError`: a refusal
+/// added to either is a compile error in every build of the checks until
+/// someone says which it is (ledger 10191 H1).
+fn copy_answer(refusal: SpaceError) -> UserError {
+    match refusal {
+        SpaceError::OutOfMemory | SpaceError::Backing(VmoError::OutOfMemory) => UserError::NoMemory,
+        SpaceError::NotUserRange(_)
+        | SpaceError::BadRange
+        | SpaceError::NotMapped(_)
+        | SpaceError::Refused(_)
+        | SpaceError::Backing(
+            VmoError::OutOfRange { .. } | VmoError::Poisoned(_) | VmoError::Sealed,
+        )
+        | SpaceError::PastEnd(_)
+        | SpaceError::Unreadable(_)
+        | SpaceError::OtherMemoryType
+        | SpaceError::Unmeasured
+        | SpaceError::ImagesFull
+        | SpaceError::Evicted => UserError::Fault,
+    }
+}
+
+/// Each refusal the space can make answers a copy as [`copy_answer`] says: a
+/// want of a frame, the space's or its object's, is `NoMemory`, and every other
+/// is `Fault`; and a copy to an address the space never mapped answers `Fault`.
+/// `object::quota_check`'s memory case makes the first by a job's limit (ledger
+/// 7011 R.2).
+///
+/// Verifies: L.object.342
+fn check_a_copy_says_why(space: &AddressSpace) -> Result<u32, &'static str> {
+    let at = opaque(LOW);
+    // Every variant of both enums.
+    let refusals = [
+        SpaceError::OutOfMemory,
+        SpaceError::Backing(VmoError::OutOfMemory),
+        SpaceError::NotUserRange(at),
+        SpaceError::BadRange,
+        SpaceError::NotMapped(at),
+        SpaceError::Refused(at),
+        SpaceError::Backing(VmoError::OutOfRange {
+            index: at,
+            pages: 1,
+        }),
+        SpaceError::Backing(VmoError::Poisoned(at / P)),
+        SpaceError::Backing(VmoError::Sealed),
+        SpaceError::PastEnd(at),
+        SpaceError::Unreadable(at),
+        SpaceError::OtherMemoryType,
+        SpaceError::Unmeasured,
+        SpaceError::ImagesFull,
+        SpaceError::Evicted,
+    ];
+    for refusal in refusals {
+        if UserError::from(refusal) != copy_answer(refusal) {
+            return Err("a copy's refusal does not answer as its cause");
+        }
+    }
+    // Half way up the user half: nothing these checks map is there.
+    let never = opaque((USER_VIRT_END / 2) & !(P - 1));
+    if uaccess::copy_to_user(space, never, &[1]) != Err(UserError::Fault) {
+        return Err("a copy to an address never mapped did not answer Fault");
+    }
+    Ok(refusals.len() as u32 + 1)
 }
 
 /// `map_device` refuses a length that is not whole pages and a range that
