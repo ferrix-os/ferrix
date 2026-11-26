@@ -911,16 +911,22 @@ mod tests {
     }
 
     #[test]
-    fn desktop_and_fast_build_and_max_is_refused_by_lands() {
+    fn desktop_fast_and_max_build_and_max_only_on_aarch64() {
         assert_eq!(resolve(Some("desktop"), &[]).unwrap().level, "none");
         // `fast` since its flip (ledger 7363), at no claim until M7 writes its level.
         assert_eq!(resolve(Some("fast"), &[]).unwrap().level, "none");
-        let why = resolve(Some("max"), &[]).unwrap_err().to_string();
+        // `max` since its flip (ledger 10916), at no claim, on AArch64 alone: x86-64 is
+        // refused by name, by the two values built there for no claim of `max`'s.
+        let max = resolve(Some("max"), &[]).unwrap();
+        assert_eq!(max.level, "none");
+        assert!(built_for(&max, "aarch64").is_ok());
+        let why = built_for(&max, "x86_64").unwrap_err().to_string();
         assert!(
-            why.contains("not yet buildable") && why.contains("M3") && why.contains("M6"),
+            why.contains("not built for x86_64")
+                && why.contains("kernel_memory=retyped")
+                && why.contains("schedule=windows"),
             "{why}"
         );
-        assert!(resolve_unbuilt(Some("max"), &[]).is_ok());
     }
 
     #[test]
@@ -1026,9 +1032,9 @@ mod tests {
         (
             "max",
             "sc4",
-            // `exit`, `restricted_fastpath=off` and `fault_ahead=off` built since their flip
-            // (ledger 7016 B.4-B.6, 10144).
-            &["kernel_memory=retyped", "schedule=windows"],
+            // Empty since the flip of 2026-11-26 (ledger 10916): `max` builds on AArch64, at
+            // level none, held to sc4; `exit`, `off` and `off` built since ledger 10144.
+            &[],
         ),
     ];
 

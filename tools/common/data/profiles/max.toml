@@ -1,7 +1,8 @@
 # `max`: the microkernel at the top level (docs/BUILD-FLAGS.md §1): IEC
 # 61508-3 SC 4 / ISO 26262 ASIL D, carried from M7. Its true values from M0
-# (BF8): xtask refuses to build it, naming each value `built` does not say yet
-# (docs/microkernel/FLIP.md).
+# (BF8). It builds on AArch64 at level none since its flip of 2026-11-26
+# (ledger 10916, 10927), held to sc4; x86-64 refuses it by `built_on`, naming
+# schedule=windows and kernel_memory=retyped (docs/microkernel/FLIP.md).
 #
 # ipc_fastpath is `off` until one coverage run has measured the fast path and
 # its vulnerability-analysis entry exists (the customer's rule of 2026-10-02,
@@ -15,7 +16,8 @@
 # machine is refused by name before linuxd runs (FX-0955, "the machine is too small for
 # kernel_memory=retyped"). Not a board figure: the target's is M7's (ledger 7017 R.5, 10379, 10468).
 # These were found on debug images. A release image is refused by name at 640 MiB under fs=server
-# (tag n27c-k9-s2-rel-dev, develop 2d96e34fe); its minimum is not yet found (ledger 10735 M2, M3).
+# (tag n27c-k9-s2-rel-dev, develop 2d96e34fe). Release boots at 768 MiB on AArch64; its minimum
+# not found (ledger 10916 R5; the finding moved to before M5's flip, BACKLOG).
 
 profile = "max"
 # No claim until M7, which writes `level = "sc4"` and takes `target_level` out, and rule 3
