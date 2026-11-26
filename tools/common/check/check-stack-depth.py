@@ -173,10 +173,16 @@ EXIT = "ferrix_kernel_load::syscall::deliver::return_to_user"
 RECURSIONS = (
     (
         "the scheduler's tree",
-        (r"^ferrix_sched::tree::(walk|find|insert|remove|remove_min)::",),
+        (r"^ferrix_sched::tree::(walk|find|insert|remove|remove_min|insert_plain|remove_plain)::",),
         False,
         "the run queue's and the timers' tree is AVL (ferrix_sched::tree, rebalanced at every insert "
-        "and remove): one level a node, at most 1.44 log2(n + 2) for n entities on one processor's queue",
+        "and remove): one level a node, at most 1.44 log2(n + 2) for n entities on one processor's queue; "
+        "`Ordered`'s set under schedule=windows (insert_plain, remove_plain) is the same tree in its plain "
+        "order, rebalanced the same way, and insert and remove have the same answer: n is capped today only "
+        "by memory (each entity a task holding at least one frame, so n is at most the machine's frames); "
+        "for 2^24 frames (64 GiB, a stand-in above any machine max runs on) at most 35 levels, so "
+        "(35 - 1) x 64 = 2,176 bytes for remove_plain and 34 x 48 = 1,632 for insert_plain against the "
+        "4,096 left on the judged line (ledger 10983 D1; the fixed task count is K16.9's, BACKLOG)",
         None,
     ),
     (
@@ -1114,6 +1120,8 @@ def self_test():
     assert not recursion_listed(("a", "b", "c"), anchored[0], selfish), "a self-call beside the anchor"
     tree = next(each for each in RECURSIONS if each[0] == "the scheduler's tree")
     assert recursion_listed(("ferrix_sched::tree::insert::<x>",), tree)
+    assert recursion_listed(("ferrix_sched::tree::insert_plain::<x>",), tree)
+    assert recursion_listed(("ferrix_sched::tree::remove_plain::<x>",), tree)
     # core's recursive sort is listed by no entry: its four entries left with F-112's fix
     # (ledger 9275 K4), so a part of it on a judged line fails the row as not listed.
     assert not any(

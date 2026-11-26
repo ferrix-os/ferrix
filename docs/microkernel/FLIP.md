@@ -67,6 +67,7 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | BACKLOG 559 | item 3: `max`'s stop on an uncovered processor, in code (10848; text aa6bb4a6e) | M5's flip: moved by the consultant (ledger 10916), the rows on `neoverse-n1` |
 | BACKLOG 560 | item 4: a row's boot options against its profile, by a checker (LV.5, 10522 (C)) | M5's flip: moved by the consultant (ledger 10916), the hand table below in its place |
 | BACKLOG 561 | `test-init` on a command line `max` permits (10963 S6) | M5's flip |
+| BACKLOG 562 | the scheduler tree's stack bound from a fixed task count, not memory (10983 D4) | M5's flip, with K16.9 |
 | BACKLOG 551 | R3 charging, `TRANSFER`, rows with no check, §7's rows | M5's flip |
 | BACKLOG 569 | `fault_ahead`'s A7 controls | `built` of `on` (B.6): done 2026-11-26, on develop on both architectures (ledger 10259, `n27c-fa-*`) |
 | BACKLOG 577 | the window's W2-W8 | M5's flip |
