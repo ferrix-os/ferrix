@@ -4,14 +4,34 @@
 T2 / TQL-5, and separate code from the generator (not F-27's independence): it
 parses the file itself, reading the images from ROOT, and refuses a digest that is
 not its image's, a device named twice, a reservation past the board's memory, and any
-malformed field. Usage: check-partitions.py FILE ROOT [--memory-pages N].
+malformed field, and a max_processes past ring 0's tables (K16.9). Usage: check-partitions.py FILE ROOT [--memory-pages N].
 """
 import argparse
 import hashlib
+import pathlib
+import re
 import struct
 import sys
 
 HEADER, PARTITION, DEVICE, DEVICES = 16, 168 + 8 * 112, 112, 8
+
+PROCESS_RS = pathlib.Path(__file__).resolve().parents[3] / "src/kernel/src/object/process.rs"
+
+
+def max_processes() -> int:
+    """The most processes a description may ask for: ring 0's pid table under
+    kernel_memory=retyped holds FIXED_TASKS tasks, TASKS_PER_PROCESS each, read from
+    the kernel's own source so the two cannot drift (K16.9, ledger 10548 Z4). Refused
+    under every flag, so one description boots both memory models; zero means the
+    kernel's own."""
+    source = PROCESS_RS.read_text()
+    found = {
+        name: int(value)
+        for name, value in re.findall(r"pub const (FIXED_TASKS|TASKS_PER_PROCESS): usize = (\d+);", source)
+    }
+    if set(found) != {"FIXED_TASKS", "TASKS_PER_PROCESS"}:
+        raise SystemExit(f"check-partitions: {PROCESS_RS} names no FIXED_TASKS or TASKS_PER_PROCESS")
+    return found["FIXED_TASKS"] // found["TASKS_PER_PROCESS"]
 
 
 def text(field: bytes, what: str, problems: list[str]) -> str:
@@ -26,9 +46,12 @@ def judge(data: bytes, root: str, memory_pages: int | None) -> list[str]:
     problems: list[str] = []
     if len(data) < HEADER or data[:4] != b"FXPD":
         return ["no FXPD header"]
-    version, count, _processes, _ready_millis = struct.unpack_from("<HHII", data, 4)
+    version, count, processes, _ready_millis = struct.unpack_from("<HHII", data, 4)
     if version != 1:
         problems.append(f"version {version}")
+    most = max_processes()
+    if processes > most:
+        problems.append(f"max_processes {processes}: more than ring 0's tables hold ({most})")
     if count > 16:
         problems.append(f"{count} partitions")
     if len(data) != HEADER + count * PARTITION:
