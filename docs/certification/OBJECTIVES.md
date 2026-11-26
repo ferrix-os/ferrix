@@ -61,6 +61,18 @@ not assigned to one here. Which tables carry which objectives at level A, and
 which of those the standard asks to be met with independence, is part of what
 the text must be read for; this file asserts neither.
 
+## Owed by the item, recorded before any audit
+
+Not mapped to a table, since the text is not held; each is for the audit to place.
+
+* `schedule=windows`, `max`'s schedule (ledger 10241 T6, 10361 D6): no task executes outside its
+  window beyond a stated bound, judged on `max`'s image on a real core, before M5's flip. Under a
+  hypervisor the boot check reads a late pick after a last sample within the bound as the host's
+  stall (WH.2), and on AArch64 TCG a starved host was seen running a partition's task in another
+  partition's window (n27a-burst4-1); on a real core a stall is the kernel's own (an interrupt held
+  off, a long handler) and is judged as an overrun. `docs/BACKLOG.md`'s idle-at-end row (678) holds
+  the run.
+
 ## What the first audit that holds the text does
 
 1. Replaces each placeholder with one row per objective, from the text, and

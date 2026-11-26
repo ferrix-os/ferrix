@@ -652,6 +652,14 @@
      ],
      "dropped": "new code; no coverage run has measured it yet.",
      "what": "object/oom.rs: hand_over, emptier, empty, let_go, in_slot, through_gate, victim_done and the checks' accessors are reached by the quota check's check_the_emptier (object::quota_check) and the two OOM cases beside it on every boot. Argued, not run (no case makes two victims stall in turn): hand_over's wait while an unmarked given-up space holds the slot (`unmarked`), its Earlier branch (a stalled space displaced, kept as a Weak in `given_up`), its given_up branch (a displaced space marked at its own look), and the emptier's marking of `given_up` at its wake. The argument is docs/OOM-REAPER.md 2.6a; filed in COVERAGE-RESIDUAL at the next measure."
+    },
+    {
+      "landing": "sebastian-27a, schedule=windows' code, dark (docs/microkernel/K9.md section 4; consultant ledger 10361 D4), owner sebastian-27a",
+      "architectures": [
+        "x86_64"
+      ],
+      "dropped": "carried from develop's evidence, 1 anchor dropped as unmeasured: x86_64 residual arch/speculation.rs:576 (publish_leaving's wait, now sched::give_way).",
+      "what": "arch/speculation.rs's publish_leaving: its wait for a LEAVING slot gives way by sched::give_way (a yield under every schedule but windows, a 1 ms sleep under windows); the edited line is unmeasured until the next x86_64 coverage run measures or argues it again. sched::give_way and the windows code (sched/windows.rs, ferrix-sched-windows) are new code reached only under schedule=windows, which no coverage run builds yet."
     }
   ]
 }
