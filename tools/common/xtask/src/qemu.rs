@@ -25,6 +25,12 @@ pub(crate) const SUCCESS_MARKER: &str = "FERRIX-BOOT-OK";
 /// What the panic handler prints. Seeing this ends the test immediately: the
 /// kernel will not recover, and waiting out the timeout only hides the reason.
 pub(crate) const PANIC_MARKER: &str = "FERRIX-PANIC";
+
+/// What `schedule=windows`' boot check prints when the boot measured a stall and did not judge
+/// time (the kernel's `windows_check::TIME_NOT_JUDGED`). Under KVM a boot is expected clean: such
+/// a boot is no passed row, and is run again on a quieter host, both runs named (ledger 10800 W4,
+/// 10823 D5).
+pub(crate) const TIME_NOT_JUDGED: &str = "windows  time NOT JUDGED";
 /// What the kernel prints instead of [`SUCCESS_MARKER`] when
 /// `ferrix.checks=skip` had it bring every stage up without checking it. Never
 /// a pass: a boot waiting for the success marker that sees this one fails at
@@ -2947,7 +2953,28 @@ fn watch_hooked(
     sieved
         .dma
         .judge(arch, verdict == Verdict::Reached, &lines, &log_path)?;
+    let kvm = BOOT_FORM
+        .with(core::cell::Cell::get)
+        .is_some_and(|(kvm, _)| kvm);
+    if let Some(line) = unjudged_time(kvm, &lines) {
+        return Err(Error::new(format!(
+            "{arch}: under KVM the schedule=windows check measured a stall and did not judge \
+             time, so this is not a passed row (ledger 10800 W4): run it again on a quieter host \
+             and name both runs. It said `{}`.\n  Serial output is in {}",
+            line.trim(),
+            log_path.display()
+        )));
+    }
     finish_watching(lines, verdict, ended, log_path)
+}
+
+/// The line of a KVM boot whose `schedule=windows` check did not judge time, which makes it no
+/// passed row (ledger 10800 W4, 10878 J4); under TCG none, the line being a printed figure there.
+fn unjudged_time(kvm: bool, lines: &[String]) -> Option<&String> {
+    lines
+        .iter()
+        .find(|line| line.contains(TIME_NOT_JUDGED))
+        .filter(|_| kvm)
 }
 
 /// What [`watch_hooked`] saw, once QEMU is gone; and, for a coverage run, the
@@ -5704,6 +5731,38 @@ pub(crate) fn test_first_process_dies(
 
 #[cfg(test)]
 mod tests {
+    /// Ledger 10878 J4: a KVM boot printing either of the windows check's NOT JUDGED lines (the
+    /// main case's stall, WN.4's missed aim) is no passed row; a TCG boot is; a boot without the
+    /// line is; and the kernel prints the very sentence xtask looks for.
+    #[test]
+    fn a_kvm_boot_whose_windows_check_did_not_judge_time_is_no_passed_row() {
+        use super::{TIME_NOT_JUDGED, unjudged_time};
+        let stall = [
+            "    3.42 |   windows  time NOT JUDGED in this boot: 2 of 158 picks more than 2000000 ns after the deadline asked (worst 3135376 ns), 0 first stamps more than 2000000 ns after their pick (worst 272096 ns); the class's decisions judged".to_owned(),
+        ];
+        let wn4 = [
+            "    3.99 |   windows  time NOT JUDGED in this boot: WN.4 made no wake that counted in 50 frames: 50 looks past 0 ns into the frame (worst 110 ns after the aim), 0 wakes stamped outside partition 0's window or with no time to look, 0 on the held processor".to_owned(),
+        ];
+        let clean = [
+            "    2.68 |   windows  two partitions' windows of 2 and 3 ms on processor 1: ... time judged by the stamps (no pick more than 2 ms late) ...".to_owned(),
+        ];
+        assert!(unjudged_time(true, &stall).is_some());
+        assert!(unjudged_time(true, &wn4).is_some());
+        assert!(unjudged_time(false, &stall).is_none());
+        assert!(unjudged_time(false, &wn4).is_none());
+        assert!(unjudged_time(true, &clean).is_none());
+        assert!(unjudged_time(true, &[]).is_none());
+        let kernel = include_str!("../../../../src/kernel/src/sched/windows_check.rs");
+        assert!(
+            kernel.contains(&format!(
+                "const TIME_NOT_JUDGED: &str = \"{TIME_NOT_JUDGED}\";"
+            )),
+            "the kernel's TIME_NOT_JUDGED is not xtask's"
+        );
+        assert!(kernel.contains("\"  {TIME_NOT_JUDGED} in this boot: {} of {} picks"));
+        assert!(kernel.contains("\"  {TIME_NOT_JUDGED} in this boot: WN.4 made no wake"));
+    }
+
     #[test]
     fn a_boot_past_its_ratchet_is_judged_only_on_a_quiet_host_and_the_limit_never_scaled() {
         use super::{BootTime, boot_time};

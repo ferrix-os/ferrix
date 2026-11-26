@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "6c02cf25d7b808b88523a2c417fc92e3b2a8365535bd85c4fa4f2970b2cff071",
+  "digest": "46952b0e7d9ef5fb036863b27f52754e874a23c8cb8b7eaaabe9408bd5131a11",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -52714,10 +52714,10 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aWindowsPickReadsOnlyItsPartition",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"windows_check::run's samples, failure line `windows: a task ran outside its window past the pick that ended it` (and `... and no pick after the window's end was logged`, `... before its first one, or past the frames kept`), and `windows: a task never ran in its window`; the host test a_window_runs_only_its_partition_and_idles_when_empty. Control: the pick ignores the window.\"",
+                      "value": "\"windows_check::run's samples, failure line `windows: a task ran outside its window past the pick that ended it` (and `... and no pick after the window's end was logged`, `... before its first one, or past the frames kept`), and `windows: a task never ran in its window`, judged in a boot that measured itself clean; and by the class's picks in every boot (ledger 10241 T4), `windows: by the class's picks, a task was picked outside its window`, `... a task was never picked`, `... the check's log of picks was full`; the host test a_window_runs_only_its_partition_and_idles_when_empty. Control: the pick ignores the window.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1449
+                        "line": 1452
                       }
                     },
                     {
@@ -52728,7 +52728,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1450
+                        "line": 1453
                       }
                     },
                     {
@@ -52739,7 +52739,7 @@
                       "value": "(\"sched::queue::CpuQueue::pick_next\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1451
+                        "line": 1454
                       }
                     }
                   ]
@@ -52752,7 +52752,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1453
+                    "line": 1456
                   },
                   "children": [
                     {
@@ -52763,7 +52763,7 @@
                       "value": "\"A processor with no runnable task of the window's partition shall be idle and halt; has_work shall read the window's partition alone.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1456
+                        "line": 1459
                       }
                     },
                     {
@@ -52771,10 +52771,10 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aWindowWithNothingOfItsPartitionIdles",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"windows_check::run's gap looks, failure lines `windows: a processor in a gap read another partition's task as work`, `windows: no look found the held processor in a gap with work queued` and, in partition 0's window, `windows: has_work was never read false in partition 0's window with the partition-2 task queued`. Control: is_empty read for has_work.\"",
+                      "value": "\"windows_check::run's gap looks, failure lines `windows: a processor in a gap read another partition's task as work`, `windows: no look found the held processor in a gap with work queued` and, in partition 0's window, `windows: has_work was never read false in partition 0's window with the partition-2 task queued`; by the class's picks in every boot (ledger 10823 D2), `windows: by the class's picks, a processor idled in a window with a task of its partition waiting`. Control: is_empty read for has_work.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1461
+                        "line": 1466
                       }
                     },
                     {
@@ -52785,7 +52785,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1462
+                        "line": 1467
                       }
                     },
                     {
@@ -52796,7 +52796,7 @@
                       "value": "(\"sched::queue::CpuQueue::has_work\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1463
+                        "line": 1468
                       }
                     }
                   ]
@@ -52809,7 +52809,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1465
+                    "line": 1470
                   },
                   "children": [
                     {
@@ -52820,7 +52820,7 @@
                       "value": "\"Within a partition a higher level shall preempt a lower at once.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1467
+                        "line": 1472
                       }
                     },
                     {
@@ -52828,10 +52828,10 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::aHigherLevelPreemptsALower",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"The host tests; windows_check::run, failure line `windows: a lower level ran while a higher one was runnable`.\"",
+                      "value": "\"The host tests; windows_check::run, failure line `windows: a lower level ran while a higher one was runnable` by the stamps in a boot that measured itself clean, and `windows: by the class's picks, a lower level ran while a higher one was runnable` in every boot (ledger 10241 T4).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1469
+                        "line": 1476
                       }
                     },
                     {
@@ -52842,7 +52842,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1470
+                        "line": 1477
                       }
                     },
                     {
@@ -52853,7 +52853,7 @@
                       "value": "(\"sched::queue::CpuQueue::pick_next\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1471
+                        "line": 1478
                       }
                     }
                   ]
@@ -52866,7 +52866,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1473
+                    "line": 1480
                   },
                   "children": [
                     {
@@ -52877,7 +52877,7 @@
                       "value": "\"Equal levels shall take turns of one 2 ms quantum, counted in running time, its remainder kept across a window's end.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1476
+                        "line": 1483
                       }
                     },
                     {
@@ -52885,10 +52885,10 @@
                       "qualifiedName": "FerrixSchedRequirements::DirectSwitch::AppliedAffinity::equalsTakeTurnsOfAQuantum",
                       "kind": "attribute",
                       "redefines": "criterion",
-                      "value": "\"The host tests; windows_check::run, failure line `windows: equals did not take turns`.\"",
+                      "value": "\"The host tests; windows_check::run, failure line `windows: equals did not take turns` by the stamps in a boot that measured itself clean, and `windows: by the class's picks, equals did not take turns` in every boot: a pick after the running task spent its quantum, an equal of it waiting, is not that task (ledger 10241 T4). Control: the spent task put back before its equals.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1477
+                        "line": 1488
                       }
                     },
                     {
@@ -52899,7 +52899,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1478
+                        "line": 1489
                       }
                     },
                     {
@@ -52910,7 +52910,7 @@
                       "value": "(\"sched::queue::CpuQueue::pick_next\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1479
+                        "line": 1490
                       }
                     }
                   ]
@@ -52923,7 +52923,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1481
+                    "line": 1492
                   },
                   "children": [
                     {
@@ -52934,7 +52934,7 @@
                       "value": "\"The seal shall refuse overlapping windows on one processor.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1483
+                        "line": 1494
                       }
                     },
                     {
@@ -52945,7 +52945,7 @@
                       "value": "\"windows_check's case. Control: the seal accepts overlap.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1484
+                        "line": 1495
                       }
                     },
                     {
@@ -52956,7 +52956,7 @@
                       "value": "\"H.SCHED.27\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1485
+                        "line": 1496
                       }
                     },
                     {
@@ -52967,7 +52967,7 @@
                       "value": "(\"sched::windows::set_window\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1486
+                        "line": 1497
                       }
                     }
                   ]
@@ -52980,7 +52980,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1488
+                    "line": 1499
                   },
                   "children": [
                     {
@@ -52991,7 +52991,7 @@
                       "value": "\"The seal shall refuse a window past major_ns.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1489
+                        "line": 1500
                       }
                     },
                     {
@@ -53002,7 +53002,7 @@
                       "value": "\"windows_check's case.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1490
+                        "line": 1501
                       }
                     },
                     {
@@ -53013,7 +53013,7 @@
                       "value": "\"H.SCHED.27\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1491
+                        "line": 1502
                       }
                     },
                     {
@@ -53024,7 +53024,7 @@
                       "value": "(\"sched::windows::check_seal\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1492
+                        "line": 1503
                       }
                     }
                   ]
@@ -53037,7 +53037,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1494
+                    "line": 1505
                   },
                   "children": [
                     {
@@ -53048,7 +53048,7 @@
                       "value": "\"The seal shall refuse a window on a processor out of service, and a processor in service with no partition-0 window of 500 us.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1497
+                        "line": 1508
                       }
                     },
                     {
@@ -53059,7 +53059,7 @@
                       "value": "\"windows_check's cases.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1498
+                        "line": 1509
                       }
                     },
                     {
@@ -53070,7 +53070,7 @@
                       "value": "\"H.SCHED.27\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1499
+                        "line": 1510
                       }
                     },
                     {
@@ -53081,7 +53081,7 @@
                       "value": "(\"sched::windows::check_seal\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1500
+                        "line": 1511
                       }
                     }
                   ]
@@ -53094,7 +53094,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1502
+                    "line": 1513
                   },
                   "children": [
                     {
@@ -53105,7 +53105,7 @@
                       "value": "\"A second seal and a window after the seal shall be refused, and a frame shall not be taken off once the boot's is sealed.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1505
+                        "line": 1516
                       }
                     },
                     {
@@ -53116,7 +53116,7 @@
                       "value": "\"windows_check's after-seal cases. Controls: the merged pick read after the seal; a frame taken off after the seal.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1508
+                        "line": 1519
                       }
                     },
                     {
@@ -53127,7 +53127,7 @@
                       "value": "\"H.SCHED.27\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1509
+                        "line": 1520
                       }
                     },
                     {
@@ -53138,7 +53138,7 @@
                       "value": "(\"sched::windows::seal\", \"sched::windows::uninstall_check\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1510
+                        "line": 1521
                       }
                     }
                   ]
@@ -53151,7 +53151,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1512
+                    "line": 1523
                   },
                   "children": [
                     {
@@ -53162,7 +53162,7 @@
                       "value": "\"Unsealed, the boot authority shall start no first process (FX-0927).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1514
+                        "line": 1525
                       }
                     },
                     {
@@ -53173,7 +53173,7 @@
                       "value": "\"test-flags: xtask's seal_order_problem requires the seal's line before the first line of any first process (partmgr's, devmgr's, linuxd's), by order, failure line `under schedule=windows a first process's line came before the seal's`; the stage panic. Control: an unsealed first process allowed.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1518
+                        "line": 1529
                       }
                     },
                     {
@@ -53184,7 +53184,7 @@
                       "value": "\"H.SCHED.27\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1519
+                        "line": 1530
                       }
                     },
                     {
@@ -53195,7 +53195,7 @@
                       "value": "(\"boot_authority::run\", \"sched::windows::seal_default\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1520
+                        "line": 1531
                       }
                     }
                   ]
@@ -53208,7 +53208,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1522
+                    "line": 1533
                   },
                   "children": [
                     {
@@ -53219,7 +53219,7 @@
                       "value": "\"A job's partition shall be its parent's at its making; a partition shall be refused for a job with a thread or child, or not a child of the root, and partition 0 for any job.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1526
+                        "line": 1537
                       }
                     },
                     {
@@ -53230,7 +53230,7 @@
                       "value": "\"windows_check's job cases.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1527
+                        "line": 1538
                       }
                     },
                     {
@@ -53241,7 +53241,7 @@
                       "value": "\"H.SCHED.27\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1528
+                        "line": 1539
                       }
                     },
                     {
@@ -53252,7 +53252,7 @@
                       "value": "(\"sched::windows::assign\", \"object::job::Job::partition\", \"object::job::Job::set_partition\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1529
+                        "line": 1540
                       }
                     }
                   ]
@@ -53265,7 +53265,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1531
+                    "line": 1542
                   },
                   "children": [
                     {
@@ -53276,7 +53276,7 @@
                       "value": "\"A kernel thread and a task with no job shall run in partition 0 alone.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1533
+                        "line": 1544
                       }
                     },
                     {
@@ -53287,7 +53287,7 @@
                       "value": "\"windows_check::run, failure line `windows: a kernel thread is not in partition 0` (the check's own thread, and each it makes before it rehomes one); the check's threads re-homed only by its own body. Control: a kernel thread placed outside partition 0.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1537
+                        "line": 1548
                       }
                     },
                     {
@@ -53298,7 +53298,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1538
+                        "line": 1549
                       }
                     },
                     {
@@ -53309,7 +53309,7 @@
                       "value": "(\"sched::task::Task::new\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1539
+                        "line": 1550
                       }
                     }
                   ]
@@ -53322,7 +53322,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1541
+                    "line": 1552
                   },
                   "children": [
                     {
@@ -53333,7 +53333,7 @@
                       "value": "\"A wake of a task of another partition than the window's at the wake's own instant shall send no kick, nor place the task on a processor whose window then does not admit its partition; one into the open window's partition shall kick as before.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1546
+                        "line": 1557
                       }
                     },
                     {
@@ -53344,7 +53344,7 @@
                       "value": "\"windows_check::run, failure lines `windows: no wake into another partition's window was left unkicked`, `windows: a wake in partition 0's window kicked the halted processor` and `windows: a wake in partition 0's window decided no kick, suppressed or sent`; the host test a_wake_reads_the_window_at_its_own_instant (a class last told the time in an earlier frame's window). Control: the wake kicks across.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1552
+                        "line": 1563
                       }
                     },
                     {
@@ -53355,7 +53355,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1553
+                        "line": 1564
                       }
                     },
                     {
@@ -53366,7 +53366,7 @@
                       "value": "(\"sched::wake_at_home\", \"sched::wake_onto\", \"sched::place_on_idle\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1554
+                        "line": 1565
                       }
                     }
                   ]
@@ -53379,7 +53379,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1556
+                    "line": 1567
                   },
                   "children": [
                     {
@@ -53390,7 +53390,7 @@
                       "value": "\"hand_over across partitions, or to a peer the window may not run, shall decline.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1558
+                        "line": 1569
                       }
                     },
                     {
@@ -53401,7 +53401,7 @@
                       "value": "\"windows_check::run under ipc_fastpath=on (the hand-over is built only there), failure lines `windows: hand_over across partitions was accepted` and `... never reached its partitions' test`; the declined count. Without the fast path the line says no hand-over is built. Control: hand_over across partitions accepted.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1563
+                        "line": 1574
                       }
                     },
                     {
@@ -53412,7 +53412,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1564
+                        "line": 1575
                       }
                     },
                     {
@@ -53423,7 +53423,7 @@
                       "value": "(\"sched::direct::begin\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1565
+                        "line": 1576
                       }
                     }
                   ]
@@ -53436,7 +53436,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1567
+                    "line": 1578
                   },
                   "children": [
                     {
@@ -53447,7 +53447,7 @@
                       "value": "\"Steal, balance, push and the wake's pull shall move only a task of the destination's current partition.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1569
+                        "line": 1580
                       }
                     },
                     {
@@ -53458,7 +53458,7 @@
                       "value": "\"windows_check::run's looks through latest_where, the body steal_candidate asks, failure lines `windows: steal could take a task of a partition whose window was not open` and `windows: no look found a task steal could take`; the host test steal_sees_the_window_alone. Control: a steal of another partition's task.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1574
+                        "line": 1585
                       }
                     },
                     {
@@ -53469,7 +53469,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1575
+                        "line": 1586
                       }
                     },
                     {
@@ -53480,7 +53480,7 @@
                       "value": "(\"sched::queue::CpuQueue::steal_candidate\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1576
+                        "line": 1587
                       }
                     }
                   ]
@@ -53493,7 +53493,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1578
+                    "line": 1589
                   },
                   "children": [
                     {
@@ -53504,7 +53504,7 @@
                       "value": "\"The overrun at each window's end shall be measured as the time to the pick that ended it, every sample outside a window shall lie before that pick, and the worst shall be printed.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1582
+                        "line": 1593
                       }
                     },
                     {
@@ -53515,7 +53515,7 @@
                       "value": "\"windows_check::run's line prints the worst overrun over the windows a task ran past, the last sample past the end, with the pick's distance beside it and a late pick after a last sample within the bound counted as a stall (ledger 7732); on x86-64 failure line `windows: a window's end was overrun past its bound` (500 us); AArch64 prints it unjudged. A window that ends with nothing of it running prints its late pick as the worst start delay, counted and not judged (ledger 7714 WJ.1-WJ.2).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1590
+                        "line": 1601
                       }
                     },
                     {
@@ -53526,7 +53526,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1591
+                        "line": 1602
                       }
                     },
                     {
@@ -53537,7 +53537,7 @@
                       "value": "(\"sched::windows::overruns\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1592
+                        "line": 1603
                       }
                     }
                   ]
@@ -53550,7 +53550,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1594
+                    "line": 1605
                   },
                   "children": [
                     {
@@ -53561,7 +53561,7 @@
                       "value": "\"Under schedule=windows no task shall be on a fair run queue, and RunQueue's pick shall not be in the kernel.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1596
+                        "line": 1607
                       }
                     },
                     {
@@ -53572,7 +53572,7 @@
                       "value": "\"check-kernel-shape.py's symbols; the boot's type check. Control: the fair class's symbols planted.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1598
+                        "line": 1609
                       }
                     },
                     {
@@ -53583,7 +53583,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1599
+                        "line": 1610
                       }
                     },
                     {
@@ -53594,7 +53594,7 @@
                       "value": "(\"sched::queue::CpuQueue::pick_next\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1600
+                        "line": 1611
                       }
                     }
                   ]
@@ -53607,7 +53607,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1602
+                    "line": 1613
                   },
                   "children": [
                     {
@@ -53618,7 +53618,7 @@
                       "value": "\"A task's level shall be its nice's, every server's above every program's, and a cpu.weight write shall be refused.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1605
+                        "line": 1616
                       }
                     },
                     {
@@ -53629,7 +53629,7 @@
                       "value": "\"The level, in two halves. Its order: the host test every_programs_level_is_beneath_every_servers over ferrix_sched_windows::level_of, the body sched::windows::level_of calls, for nice -20 to 19 as a program against every server's level, failure line `a program's level is not beneath every server's`. Its liveness: test-threads' sched-policy step, linuxd answering beside nice -20 spinners, failure line `the threads test's sched-policy step (linuxd beside nice -20 spinners) did not end` or the step's own. The cpu.weight refusal: object::rehome_check::check_the_weight under windows, failure line `a job's weight was accepted under windows`. Controls: programs' levels not beneath the servers'; cpu.weight accepted.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1615
+                        "line": 1626
                       }
                     },
                     {
@@ -53640,7 +53640,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1616
+                        "line": 1627
                       }
                     },
                     {
@@ -53651,7 +53651,7 @@
                       "value": "(\"sched::windows::level_of\", \"ferrix_sched_windows::level_of\", \"object::quota::unshared\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1617
+                        "line": 1628
                       }
                     }
                   ]
@@ -53664,7 +53664,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1619
+                    "line": 1630
                   },
                   "children": [
                     {
@@ -53675,7 +53675,7 @@
                       "value": "\"A processor back in service after the seal shall take its sealed row, or be refused.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1621
+                        "line": 1632
                       }
                     },
                     {
@@ -53686,7 +53686,7 @@
                       "value": "\"The accepted half: windows_check::after_seal, each processor in service holds its sealed row and may come back. The refused half: the host test a_processor_with_no_sealed_row_may_not_return, through Windows::may_return, the body sched::windows::may_return calls.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1625
+                        "line": 1636
                       }
                     },
                     {
@@ -53697,7 +53697,7 @@
                       "value": "\"H.SCHED.27\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1626
+                        "line": 1637
                       }
                     },
                     {
@@ -53708,7 +53708,7 @@
                       "value": "(\"sched::put_back_in_service\", \"sched::windows::may_return\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1627
+                        "line": 1638
                       }
                     }
                   ]
@@ -53721,7 +53721,7 @@
                   "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
-                    "line": 1629
+                    "line": 1640
                   },
                   "children": [
                     {
@@ -53732,7 +53732,7 @@
                       "value": "\"Under schedule=windows the timer shall be asked for each window's end, or a quantum's end before it, and what reaches the timer shall be no later.\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1632
+                        "line": 1643
                       }
                     },
                     {
@@ -53743,7 +53743,7 @@
                       "value": "\"windows_check::run, every arm on the held processor: failure lines `windows: the deadline asked at a window's end is not the window's end` (the ask), `windows: the timer was asked later than the class's ask or the arm's floor` (what reached the timer) and `windows: no arm on the held processor was judged`; the line counts the arms the 20 us floor decided. Controls: a quantum past the window (the ask), the one-shot armed later (the timer).\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1639
+                        "line": 1650
                       }
                     },
                     {
@@ -53754,7 +53754,7 @@
                       "value": "\"H.SCHED.26\"",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1640
+                        "line": 1651
                       }
                     },
                     {
@@ -53765,7 +53765,7 @@
                       "value": "(\"sched::queue::CpuQueue::arm_timer\")",
                       "source": {
                         "file": "docs/sysml/15-sched-requirements.sysml",
-                        "line": 1641
+                        "line": 1652
                       }
                     }
                   ]

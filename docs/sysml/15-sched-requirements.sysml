@@ -1444,9 +1444,12 @@ package FerrixSchedRequirements {
             attribute :>> criterion = "windows_check::run's samples, failure line `windows: a task ran outside its window past
                 the pick that ended it` (and `... and no pick after the window's end was
                 logged`, `... before its first one, or past the frames kept`), and
-                `windows: a task never ran in its window`; the host test
-                a_window_runs_only_its_partition_and_idles_when_empty. Control: the pick
-                ignores the window.";
+                `windows: a task never ran in its window`, judged in a boot that measured
+                itself clean; and by the class's picks in every boot (ledger 10241 T4),
+                `windows: by the class's picks, a task was picked outside its window`,
+                `... a task was never picked`, `... the check's log of picks was full`;
+                the host test a_window_runs_only_its_partition_and_idles_when_empty.
+                Control: the pick ignores the window.";
             attribute :>> parent = "H.SCHED.26";
             attribute :>> unit = ("sched::queue::CpuQueue::pick_next");
         }
@@ -1458,7 +1461,9 @@ package FerrixSchedRequirements {
                 another partition's task as work`, `windows: no look found the held
                 processor in a gap with work queued` and, in partition 0's window,
                 `windows: has_work was never read false in partition 0's window with the
-                partition-2 task queued`. Control: is_empty read for has_work.";
+                partition-2 task queued`; by the class's picks in every boot (ledger 10823
+                D2), `windows: by the class's picks, a processor idled in a window with a
+                task of its partition waiting`. Control: is_empty read for has_work.";
             attribute :>> parent = "H.SCHED.26";
             attribute :>> unit = ("sched::queue::CpuQueue::has_work");
         }
@@ -1466,7 +1471,9 @@ package FerrixSchedRequirements {
             attribute :>> statement = "Within a partition a higher level shall preempt a lower
                 at once.";
             attribute :>> criterion = "The host tests; windows_check::run, failure line `windows: a lower level ran while a
-                higher one was runnable`.";
+                higher one was runnable` by the stamps in a boot that measured itself
+                clean, and `windows: by the class's picks, a lower level ran while a
+                higher one was runnable` in every boot (ledger 10241 T4).";
             attribute :>> parent = "H.SCHED.26";
             attribute :>> unit = ("sched::queue::CpuQueue::pick_next");
         }
@@ -1474,7 +1481,11 @@ package FerrixSchedRequirements {
             attribute :>> statement = "Equal levels shall take turns of one 2 ms quantum,
                 counted in running time, its remainder kept across a
                 window's end.";
-            attribute :>> criterion = "The host tests; windows_check::run, failure line `windows: equals did not take turns`.";
+            attribute :>> criterion = "The host tests; windows_check::run, failure line `windows: equals did not take turns`
+                by the stamps in a boot that measured itself clean, and `windows: by the
+                class's picks, equals did not take turns` in every boot: a pick after the
+                running task spent its quantum, an equal of it waiting, is not that task
+                (ledger 10241 T4). Control: the spent task put back before its equals.";
             attribute :>> parent = "H.SCHED.26";
             attribute :>> unit = ("sched::queue::CpuQueue::pick_next");
         }

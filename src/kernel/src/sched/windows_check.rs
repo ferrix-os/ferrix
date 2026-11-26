@@ -27,6 +27,9 @@ const MAJOR: u64 = 10 * MS;
 /// round robin skews the arm by 18-21 ms, WX.5). BACKLOG owes the judged form on an honest Arm
 /// timer, and the cfg goes then (WY.11).
 const SLACK: u64 = 500 * US;
+/// What a boot that measured a stall prints, its time not judged (ledger 10800 W4, 10823 D5):
+/// under KVM xtask reads it as no passed row.
+const TIME_NOT_JUDGED: &str = "windows  time NOT JUDGED";
 /// How long each spinner runs, in wall time.
 const RUN: u64 = 60 * MS;
 /// How far ahead of its install the check's frame begins: the threads are woken before it, in
@@ -174,13 +177,103 @@ pub(crate) fn judge_requested(ask: Option<u64>, now: u64) {
     }
 }
 
-/// After every pick on the held processor while the check's frame is on it: a window's end a
-/// task still ran at, the pick that ended it (the class's own stamp, the samples' timescale),
-/// and the deadline the timer was asked for, logged once each (WX.3, WY.9).
+/// The held processor's picks in the main case (ledger 10241 T3, 10823 D2), which the decision
+/// judges read: per pick (a) the instant the class decided with, (b) the deadline the timer was
+/// last asked for, (c) the picked thread's first stamp after it, who was picked, which of the
+/// check's threads and which partitions had a task waiting, and the quantum left to the one
+/// picked. A fixed ring, no allocation, check code only, on the held processor only; a pick past
+/// it is counted, and a full ring fails the order cases (T3), never passes them unjudged. The
+/// main case takes 140 to 170 picks in the traced boots (K9 §4).
+const PICKS: usize = 512;
+static PICK_AT: [AtomicU64; PICKS] = [const { AtomicU64::new(0) }; PICKS];
+static PICK_ASKED: [AtomicU64; PICKS] = [const { AtomicU64::new(0) }; PICKS];
+static PICK_RAN: [AtomicU64; PICKS] = [const { AtomicU64::new(0) }; PICKS];
+/// 0 idle, a check thread's index plus one, or [`OTHER`].
+static PICK_WHO: [AtomicU64; PICKS] = [const { AtomicU64::new(0) }; PICKS];
+/// Bit `i`: check thread `i` waiting; bit [`WAITING_PARTITION`] + `p`: a task of partition `p`.
+static PICK_WAITING: [AtomicU64; PICKS] = [const { AtomicU64::new(0) }; PICKS];
+static PICK_LEFT: [AtomicU64; PICKS] = [const { AtomicU64::new(0) }; PICKS];
+/// The picked task's partition: what judges a pick of a task not the check's (ledger 10878 J1).
+static PICK_PART: [AtomicU64; PICKS] = [const { AtomicU64::new(0) }; PICKS];
+static PICKS_TAKEN: AtomicUsize = AtomicUsize::new(0);
+/// Set while the main case runs: the ring takes its picks alone.
+static PICKING: AtomicBool = AtomicBool::new(false);
+/// Each check thread's task id plus one, 0 until stored.
+static THREAD_IDS: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
+/// Per check thread, the index plus one of its last pick still owed its first stamp (c).
+static PENDING: [AtomicUsize; THREADS] = [const { AtomicUsize::new(0) }; THREADS];
+/// A pick of a task not the check's.
+const OTHER: u64 = u64::MAX;
+const WAITING_PARTITION: u64 = 8;
+
+/// The check thread whose task id is `id`.
+fn thread_of(id: u64) -> Option<usize> {
+    (0..THREADS).find(|&index| {
+        THREAD_IDS
+            .get(index)
+            .is_some_and(|stored| stored.load(Ordering::Relaxed) == id + 1)
+    })
+}
+
+/// One pick into the ring (10241 T3), after the class picked.
+fn record_pick(class: &super::queue::Tier<Arc<Task>>) {
+    if !PICKING.load(Ordering::Acquire) {
+        return;
+    }
+    let n = PICKS_TAKEN.fetch_add(1, Ordering::Relaxed);
+    let (Some(at), Some(asked), Some(who), Some(waiting), Some(left), Some(part)) = (
+        PICK_AT.get(n),
+        PICK_ASKED.get(n),
+        PICK_WHO.get(n),
+        PICK_WAITING.get(n),
+        PICK_LEFT.get(n),
+        PICK_PART.get(n),
+    ) else {
+        return;
+    };
+    let mut mask = 0_u64;
+    class.for_each(|view| {
+        if !view.running {
+            if let Some(index) = thread_of(view.payload.id) {
+                mask |= 1 << index;
+            }
+            let partition = u64::from(view.payload.partition.load(Ordering::Relaxed)).min(55);
+            mask |= 1 << (WAITING_PARTITION + partition);
+        }
+    });
+    let picked = class.current().map(|task| thread_of(task.id));
+    let partition = class
+        .current()
+        .map(|task| task.partition.load(Ordering::Relaxed));
+    part.store(u64::from(partition.unwrap_or(0)), Ordering::Relaxed);
+    at.store(class.now(), Ordering::Relaxed);
+    asked.store(crate::timer::requested_here(), Ordering::Relaxed);
+    waiting.store(mask, Ordering::Relaxed);
+    left.store(class.remaining_ns().unwrap_or(0), Ordering::Relaxed);
+    who.store(
+        match picked {
+            None => 0,
+            Some(None) => OTHER,
+            Some(Some(index)) => index as u64 + 1,
+        },
+        Ordering::Relaxed,
+    );
+    if let Some(Some(index)) = picked
+        && let Some(pending) = PENDING.get(index)
+    {
+        pending.store(n + 1, Ordering::Relaxed);
+    }
+}
+
+/// After every pick on the held processor while the check's frame is on it: the pick into the
+/// ring, then a window's end a task still ran at, the pick that ended it (the class's own stamp,
+/// the samples' timescale), and the deadline the timer was asked for, logged once each (WX.3,
+/// WY.9).
 pub(crate) fn note_pick(class: &super::queue::Tier<Arc<Task>>) {
     if !on_held() || class.part().is_none() {
         return;
     }
+    record_pick(class);
     // WR.3 (ledger 7648): which frames had a pick inside partition 2's window.
     let epoch = EPOCH.load(Ordering::Acquire);
     if let Some(since) = class.now().checked_sub(epoch)
@@ -224,6 +317,13 @@ pub(crate) fn note_pick(class: &super::queue::Tier<Arc<Task>>) {
 
 fn sample(index: usize) {
     let now = crate::timer::now_nanos();
+    // (c): the picked thread's first stamp after its pick.
+    if let Some(pending) = PENDING.get(index) {
+        let n = pending.swap(0, Ordering::Relaxed);
+        if let Some(ran) = n.checked_sub(1).and_then(|n| PICK_RAN.get(n)) {
+            ran.store(now, Ordering::Relaxed);
+        }
+    }
     let epoch = EPOCH.load(Ordering::Acquire);
     let (start, end) = window_of(PARTITION.get(index).copied().unwrap_or(0));
     let phase = now.saturating_sub(epoch) % MAJOR;
@@ -324,7 +424,10 @@ fn spanning(first: u64, last: u64, end: u64) -> Option<usize> {
     })
 }
 
-fn judge_samples() -> Result<Judged, &'static str> {
+/// The samples judged: `Err` for what fails in every boot (an arm past the window's end, a full
+/// log), and beside the figures the first broken rule of the stamps, which only a boot that
+/// measured itself clean judges (10241 T5, 10800 W4).
+fn judge_samples() -> Result<(Judged, Option<&'static str>), &'static str> {
     let epoch = EPOCH.load(Ordering::Acquire);
     let mut found = Judged {
         windows: 0,
@@ -452,15 +555,232 @@ fn judge_samples() -> Result<Judged, &'static str> {
         return Err("windows: the check's log of window ends was full");
     }
     if UNPLACED.load(Ordering::Acquire) != 0 {
-        return Err(
+        let _ = broken.get_or_insert(
             "windows: a task ran outside its window before its first one, or past the frames kept",
         );
     }
-    if let Some(broken) = broken {
+    if broken.is_some() {
         print_log(epoch);
-        return Err(broken);
     }
-    Ok(found)
+    Ok((found, broken))
+}
+
+/// Above it a pick's (a)-(b), the interrupt late, or (c)-(a), the processor stalled after
+/// deciding, is a stall the boot measured (10241 T5): the unloaded traces show at most about
+/// 0.3 ms on AArch64 TCG and 47 us on x86-64 KVM (K9 §4).
+const CLEAN: u64 = 2 * MS;
+
+/// What the boot measured of itself over the ring's picks (10241 T5, 10800 W4).
+struct Measured {
+    late: u64,
+    late_worst: u64,
+    slow: u64,
+    slow_worst: u64,
+}
+
+impl Measured {
+    fn clean(&self) -> bool {
+        self.late == 0 && self.slow == 0
+    }
+}
+
+fn ring_len() -> usize {
+    PICKS_TAKEN.load(Ordering::Acquire).min(PICKS)
+}
+
+fn entry(ring: &[AtomicU64; PICKS], n: usize) -> u64 {
+    ring.get(n).map_or(0, |at| at.load(Ordering::Relaxed))
+}
+
+fn measure() -> Measured {
+    let mut measured = Measured {
+        late: 0,
+        late_worst: 0,
+        slow: 0,
+        slow_worst: 0,
+    };
+    for n in 0..ring_len() {
+        let (at, asked, ran) = (
+            entry(&PICK_AT, n),
+            entry(&PICK_ASKED, n),
+            entry(&PICK_RAN, n),
+        );
+        let late = if asked == 0 {
+            0
+        } else {
+            at.saturating_sub(asked)
+        };
+        if late > CLEAN {
+            measured.late += 1;
+        }
+        measured.late_worst = measured.late_worst.max(late);
+        let slow = if ran == 0 { 0 } else { ran.saturating_sub(at) };
+        if slow > CLEAN {
+            measured.slow += 1;
+        }
+        measured.slow_worst = measured.slow_worst.max(slow);
+    }
+    measured
+}
+
+/// The judges that failed, by sentence, with how often each did, the first kept for the panic:
+/// two judges, the decisions' and the stamps', may fail on one fault (10241 T7).
+struct Failed([(&'static str, u64); 8]);
+
+impl Failed {
+    const fn new() -> Failed {
+        Failed([("", 0); 8])
+    }
+
+    fn fail(&mut self, why: &'static str) {
+        if let Some(slot) = self
+            .0
+            .iter_mut()
+            .find(|(said, count)| *count == 0 || *said == why)
+        {
+            *slot = (why, slot.1 + 1);
+        }
+    }
+
+    /// Each judge that failed, printed once; the first's sentence.
+    fn first(&self) -> Option<&'static str> {
+        for &(why, count) in self.0.iter().filter(|(_, count)| *count != 0) {
+            crate::println!("  windows  judge failed: {why} ({count} times)");
+        }
+        self.0
+            .first()
+            .filter(|(_, count)| *count != 0)
+            .map(|&(why, _)| why)
+    }
+}
+
+/// The check threads `index` takes turns with: same partition and level (L.sched.156).
+fn equals_of(index: usize) -> u64 {
+    let (Some(&partition), Some(&nice)) = (PARTITION.get(index), NICE.get(index)) else {
+        return 0;
+    };
+    (0..THREADS)
+        .filter(|&other| {
+            other != index
+                && PARTITION.get(other) == Some(&partition)
+                && NICE.get(other) == Some(&nice)
+        })
+        .fold(0, |mask, other| mask | 1 << other)
+}
+
+/// The decision judges, over the ring, in every boot (10241 T4, 10823 D2): every pick of a check
+/// thread has (a) inside that thread's own window and each is picked at least once, and every
+/// pick of another task (a) inside a window of its own partition (L.sched.153, ledger 10878 J1); no idle pick inside a window while a task of that window's partition waits
+/// (L.sched.154); no pick of win-c while win-a waits, nor from win-a's first pick until its last
+/// stamp (L.sched.155); at a pick after the running thread spent its quantum, with an equal of it
+/// waiting, the pick is not that thread (L.sched.156, K9 §4's rule).
+fn judge_picks(failed: &mut Failed) {
+    let epoch = EPOCH.load(Ordering::Acquire);
+    if PICKS_TAKEN.load(Ordering::Acquire) > PICKS {
+        failed.fail("windows: by the class's picks, the check's log of picks was full");
+        return;
+    }
+    let window = |at: u64| {
+        at.checked_sub(epoch)
+            .map(|since| (since / MAJOR, partition_at(since % MAJOR)))
+    };
+    let a_last = load(&LAST, 0);
+    let mut a_first = None;
+    let mut picked = [false; THREADS];
+    for n in 0..ring_len() {
+        let (at, who, waiting) = (
+            entry(&PICK_AT, n),
+            entry(&PICK_WHO, n),
+            entry(&PICK_WAITING, n),
+        );
+        if who == 0 {
+            if let Some((_, Some(partition))) = window(at)
+                && waiting & 1 << (WAITING_PARTITION + u64::from(partition)) != 0
+            {
+                failed.fail("windows: by the class's picks, a processor idled in a window with a task of its partition waiting");
+            }
+            continue;
+        }
+        // A task not the check's (ledger 10878 J1): judged by its own partition's window on the
+        // held processor, 153's sentence; a partition with no window here fails the same.
+        if who == OTHER {
+            let part = entry(&PICK_PART, n);
+            if !matches!(window(at), Some((_, Some(open))) if u64::from(open) == part) {
+                failed.fail("windows: by the class's picks, a task was picked outside its window");
+            }
+            continue;
+        }
+        let index = (who - 1) as usize;
+        if let Some(mark) = picked.get_mut(index) {
+            *mark = true;
+        }
+        let (start, end) = window_of(PARTITION.get(index).copied().unwrap_or(0));
+        let inside = at >= epoch && (start..end).contains(&((at - epoch) % MAJOR));
+        if !inside {
+            failed.fail("windows: by the class's picks, a task was picked outside its window");
+        }
+        if index == 0 && a_first.is_none() {
+            a_first = Some(at);
+        }
+        if index == 1
+            && (waiting & 1 != 0 || a_first.is_some_and(|first| first <= at && at <= a_last))
+        {
+            failed.fail(
+                "windows: by the class's picks, a lower level ran while a higher one was runnable",
+            );
+        }
+        // L.sched.156: the same thread picked again in the same window, its quantum spent since
+        // its last pick (the time between at least what was left: it ran throughout), a fresh
+        // quantum given, with an equal waiting.
+        if let Some(before) = n.checked_sub(1)
+            && entry(&PICK_WHO, before) == who
+        {
+            let since = entry(&PICK_AT, before);
+            let spent = at.saturating_sub(since) >= entry(&PICK_LEFT, before);
+            let fresh = entry(&PICK_LEFT, n) == ferrix_sched_windows::QUANTUM_NS;
+            if spent && fresh && window(since) == window(at) && waiting & equals_of(index) != 0 {
+                failed.fail("windows: by the class's picks, equals did not take turns");
+            }
+        }
+    }
+    if picked.iter().any(|&was| !was) {
+        failed.fail("windows: by the class's picks, a task was never picked");
+    }
+}
+
+/// The ring, printed when a judge failed: `a/b/c:who~waiting`, us from the epoch.
+fn print_picks() {
+    let epoch = EPOCH.load(Ordering::Acquire) as i64;
+    let us = |time: u64| {
+        if time == 0 {
+            -1
+        } else {
+            (time as i64 - epoch) / 1000
+        }
+    };
+    let mut line = alloc::string::String::new();
+    for n in 0..ring_len() {
+        use core::fmt::Write;
+        let who = entry(&PICK_WHO, n);
+        let name = match who {
+            0 => "idle",
+            OTHER => "other",
+            _ => NAMES.get((who - 1) as usize).copied().unwrap_or("?"),
+        };
+        let _ = write!(
+            line,
+            " {}/{}/{}:{name}~{:x}",
+            us(entry(&PICK_AT, n)),
+            us(entry(&PICK_ASKED, n)),
+            us(entry(&PICK_RAN, n)),
+            entry(&PICK_WAITING, n)
+        );
+        if line.len() > 150 {
+            crate::println!("  windows  picks{line}");
+            line.clear();
+        }
+    }
+    crate::println!("  windows  picks{line} ({} picks)", ring_len());
 }
 
 static PRINTED: AtomicUsize = AtomicUsize::new(0);
@@ -561,6 +881,10 @@ fn judge_arms(arms: u64) -> Result<(), &'static str> {
 
 /// The WN.4 case's attempts, one a frame.
 const TRIES: usize = 50;
+/// How far before its aim WN.4's sleep ends, the rest spun (ledger 10823 D5).
+const AIM_SPIN: u64 = 2 * MS;
+/// The latest phase in the frame at which WN.4's look is used: 0.2 ms before partition 2's window.
+const LOOK_BY: u64 = MS - 200 * US;
 
 /// Per frame modulo 64, the latest frame (plus one) in which the held processor picked inside
 /// partition 2's window (WR.3).
@@ -1038,6 +1362,12 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     frame_on(held, cpus)?;
     HELD.store(held, Ordering::Release);
     let unkicked = windows::unkicked();
+    for (index, task) in threads.iter().enumerate() {
+        if let Some(id) = THREAD_IDS.get(index) {
+            id.store(task.id + 1, Ordering::Relaxed);
+        }
+    }
+    PICKING.store(true, Ordering::Release);
     for task in &threads {
         super::wake(task);
     }
@@ -1060,8 +1390,46 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     // The main case judged as it ends (ledger 7663 follow-up): its arms and its samples, before
     // the kick cases, so that a fault planted in the pick or the arm fails by its own sentence
     // rather than by a kick case's that it also breaks.
+    PICKING.store(false, Ordering::Release);
     judge_arms(ARMS.load(Ordering::Acquire))?;
-    let judged = judge_samples()?;
+    // The order and the windows: the class's decisions judged in every boot (10241 T4); the
+    // stamps, wall time, only in a boot that measured itself clean, the same rule on every
+    // architecture and accelerator (T5, 10800 W4); a boot that measured a stall prints its counts
+    // and that time was not judged, which under KVM is no passed row (xtask).
+    let measured = measure();
+    let mut failed = Failed::new();
+    judge_picks(&mut failed);
+    let (judged, stamps_broken) = judge_samples()?;
+    if measured.clean() {
+        if let Some(why) = stamps_broken {
+            failed.fail(why);
+        }
+        if (0..THREADS).any(|index| load(&INSIDE, index) == 0) {
+            failed.fail("windows: a task never ran in its window");
+        }
+        // A (index 0) above C (1): C's first stamp after A's last.
+        if load(&FIRST, 1) < load(&LAST, 0) {
+            failed.fail("windows: a lower level ran while a higher one was runnable");
+        }
+        // D (2) and E (3) equals: each ran before the other ended.
+        if load(&FIRST, 2) >= load(&LAST, 3) || load(&FIRST, 3) >= load(&LAST, 2) {
+            failed.fail("windows: equals did not take turns");
+        }
+    } else {
+        crate::println!(
+            "  {TIME_NOT_JUDGED} in this boot: {} of {} picks more than {CLEAN} ns after the deadline asked (worst {} ns), {} first stamps more than {CLEAN} ns after their pick (worst {} ns); the class's decisions judged",
+            measured.late,
+            ring_len(),
+            measured.late_worst,
+            measured.slow,
+            measured.slow_worst
+        );
+    }
+    if let Some(why) = failed.first() {
+        print_threads(&judged);
+        print_picks();
+        return Err(why);
+    }
     // The other half (WX.6): with the spinners gone and the held processor idle, a wake of a
     // partition-2 thread inside partition 2's window kicks it. Tried in up to 20 frames, since a
     // look at the phase and the wake are not one instant; a wake that missed the window is the
@@ -1083,14 +1451,33 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     // nothing of partition 0 to run, sends no kick (the processor stays halted) and the thread
     // first runs at partition 2's window's start in that frame, its delay printed. Tried in up to
     // `TRIES` frames, since a look at the phase and the wake are not one instant.
+    // Aimed at 0.3 ms into a frame by a sleep to [`AIM_SPIN`] before it and a spin on the check's
+    // own processor, never the held one, bounded by the aim (ledger 10823 D5): a halted vCPU's
+    // wake under a starved host came 1 to 4.6 ms late on x86-64 (K9 §4), the spin costs it
+    // nothing. A look that still came late is used up to [`LOOK_BY`] into the frame; past it the
+    // attempt makes no wake and is counted.
     let mut halted = None;
+    let mut missed = (0_u64, 0_u64, 0_u64, 0_u64);
     for _ in 0..TRIES {
-        let phase = crate::timer::now_nanos().saturating_sub(epoch) % MAJOR;
-        super::sleep_for((3 * MS / 10 + MAJOR - phase) % MAJOR);
+        let now = crate::timer::now_nanos();
+        let phase = now.saturating_sub(epoch) % MAJOR;
+        let mut aim = now + (3 * MS / 10 + MAJOR - phase) % MAJOR;
+        if aim < now + AIM_SPIN + MS {
+            aim += MAJOR;
+        }
+        super::sleep_for(aim - AIM_SPIN - now);
+        if on_held() {
+            missed.3 += 1;
+            continue;
+        }
+        while crate::timer::now_nanos() < aim {
+            core::hint::spin_loop();
+        }
         let at = crate::timer::now_nanos();
         let phase = at.saturating_sub(epoch) % MAJOR;
-        // Aimed at 0.3 ms; a look that woke late is used up to 0.2 ms before the window opens.
-        if phase >= MS - 200 * US {
+        if phase >= LOOK_BY {
+            missed.0 += 1;
+            missed.1 = missed.1.max(at - aim);
             continue;
         }
         let window_start = at - phase + MS;
@@ -1102,6 +1489,7 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
         // [0, 1) ms of the frame, partition 0's window.
         let woke = crate::timer::now_nanos();
         if woke >= window_start || woke < window_start - MS {
+            missed.2 += 1;
             continue;
         }
         // WZ.7 (b): until partition 2's window opens, the held processor's window-aware
@@ -1139,6 +1527,7 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
         // WR.4 (ledger 7648): a wake in the last 100 us before the window leaves no time to look,
         // so it is not an attempt; its stamp was waited for above, so the next starts clean.
         if looks == 0 {
+            missed.2 += 1;
             continue;
         }
         // WS.1 (ledger 7645): every failure of this attempt prints its figures first.
@@ -1183,10 +1572,23 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
         halted = Some((ran - window_start, quiet));
         break;
     }
-    // WZ.7 (a): an attempt whose wake landed inside [0, 1) ms of the frame is required: one of
-    // `TRIES`, since the check's own sleep may wake late on a loaded host (seen at load 36, KVM).
-    let Some((halted, quiet)) = halted else {
-        return Err("windows: no wake landed in partition 0's window in 50 frames");
+    // WZ.7 (a), as ledger 10823 D5 amends it: an attempt whose wake landed inside [0, 1) ms of
+    // the frame is judged; with none in `TRIES` the case neither passes nor fails, it prints the
+    // looks' lateness and reads NOT JUDGED for this boot (10800 W4).
+    let wn4 = match halted {
+        Some((halted, quiet)) => alloc::format!(
+            "one in partition 0's window run {halted} ns after its window's start (has_work read false {quiet} times before it)"
+        ),
+        None => {
+            crate::println!(
+                "  {TIME_NOT_JUDGED} in this boot: WN.4 made no wake that counted in {TRIES} frames: {} looks past {LOOK_BY} ns into the frame (worst {} ns after the aim), {} wakes stamped outside partition 0's window or with no time to look, {} on the held processor",
+                missed.0,
+                missed.1,
+                missed.2,
+                missed.3
+            );
+            alloc::format!("WN.4 NOT JUDGED ({} of {TRIES} looks late)", missed.0)
+        }
     };
     STOP_K.store(true, Ordering::Release);
     super::wake(&woken);
@@ -1207,22 +1609,6 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     let floored = FLOORED.load(Ordering::Acquire);
     if judged.windows == 0 {
         return Err("windows: no window's end was judged");
-    }
-    for index in 0..THREADS {
-        if load(&INSIDE, index) == 0 {
-            print_threads(&judged);
-            return Err("windows: a task never ran in its window");
-        }
-    }
-    // A (index 0) above C (1): C's first stamp after A's last.
-    if load(&FIRST, 1) < load(&LAST, 0) {
-        print_threads(&judged);
-        return Err("windows: a lower level ran while a higher one was runnable");
-    }
-    // D (2) and E (3) equals: each ran before the other ended.
-    if load(&FIRST, 2) >= load(&LAST, 3) || load(&FIRST, 3) >= load(&LAST, 2) {
-        print_threads(&judged);
-        return Err("windows: equals did not take turns");
     }
     if gaps == 0 {
         return Err("windows: no look found the held processor in a gap with work queued");
@@ -1248,13 +1634,21 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     let (frame_late, frame_late_worst) = (judged.frame_late, judged.frame_late_worst);
     // x86-64 judges the worst overrun where its timer is honest (WX.4), over the windows a task
     // ran past (WJ.1: an overrun is time run past the window, H.SCHED.26); AArch64 prints it.
-    if crate::arch::WINDOW_TIMER_HONEST && over > SLACK {
+    if crate::arch::WINDOW_TIMER_HONEST && measured.clean() && over > SLACK {
         crate::println!(
             "  windows  worst run {over} ns past the end at {end} ns (outside {first}..{last}, pick {pick_past} ns past, lateness {late} ns), bound {SLACK} ns; {stalls} stalls after the window's end (worst pick {stall} ns past at {stall_at}); worst start delay {delay} ns at {delay_at} (processor idle at the end)"
         );
         return Err("windows: a window's end was overrun past its bound");
     }
-    let bound = if crate::arch::WINDOW_TIMER_HONEST {
+    let picks = ring_len();
+    let timing = if measured.clean() {
+        "time judged by the stamps (no pick more than 2 ms late)"
+    } else {
+        "time NOT JUDGED in this boot"
+    };
+    let bound = if !measured.clean() {
+        "overrun NOT JUDGED in this boot (a stall measured)"
+    } else if crate::arch::WINDOW_TIMER_HONEST {
         "within 500 us"
     } else {
         "overrun not judged on AArch64 (no honest timer under TCG; BACKLOG `schedule=windows`' 500 us overrun bound on AArch64)"
@@ -1262,9 +1656,8 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     Ok(alloc::format!(
         "two partitions' windows of 2 and 3 ms on processor {held}: each ran only in its own and \
          past its end only until the pick that ended it ({} windows judged, {} with samples \
-         outside), the gap idled ({gaps} looks), a higher level first, equals in turn, \
-         {unkicked} wakes across unkicked, {kicked} in kicked, one in partition 0's window run \
-         {halted} ns after its window's start (has_work read false {quiet} times before it), \
+         outside), the gap idled ({gaps} looks), a higher level first and equals in turn by the class's {picks} picks, {timing}, \
+         {unkicked} wakes across unkicked, {kicked} in kicked, {wn4}, \
          {arms} arms asked the window's end or a quantum's, {floored} of them armed at the 20 us \
          floor, their lateness up to 20 us, {hand_over}, {offered} looks offered steal only the \
          open window's partition; worst run {over} ns past the end at {end} ns (outside {first}..{last}, pick {pick_past} ns past, lateness {late} ns), \
