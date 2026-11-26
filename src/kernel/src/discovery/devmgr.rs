@@ -829,18 +829,13 @@ fn write_devices(
     let mut index = 0;
     let mut first = true;
     while first || index < nodes.len() {
-        // The job and the images; under `personality=user` the debug log and
-        // the cores' channel too.
-        let extra = if first {
-            1 + names.len() + 2 * usize::from(cfg!(ferrix_personality = "user"))
-        } else {
-            0
-        };
-        let room = CHANNEL_MAX_HANDLES.saturating_sub(extra) / 2;
-        let take = room.min(nodes.len() - index);
-        let message = Devices {
-            devices: u32::try_from(take).map_err(|_| "too many devices")?,
-            more: u32::try_from(nodes.len() - index - take).map_err(|_| "too many devices")?,
+        // What the message carries beside its devices -- the job, the images,
+        // the debug log and each cores' channel, on the first -- counted by the
+        // message's own `handles`, so the room left for devices is what the
+        // message will carry and never more than a channel takes.
+        let mut message = Devices {
+            devices: 0,
+            more: 0,
             first,
             names: if first { &names } else { &[] },
             unisolated_allowed: unisolated_allowed(),
@@ -850,6 +845,10 @@ fn write_devices(
             block_cores: block_cores.is_some() && first,
             net_cores: net_cores.is_some() && first,
         };
+        let room = CHANNEL_MAX_HANDLES.saturating_sub(message.handles()) / 2;
+        let take = room.min(nodes.len() - index);
+        message.devices = u32::try_from(take).map_err(|_| "too many devices")?;
+        message.more = u32::try_from(nodes.len() - index - take).map_err(|_| "too many devices")?;
         let mut bytes = [0_u8; DEVICES_MAX_BYTES];
         let len = message
             .encode(&mut bytes)
