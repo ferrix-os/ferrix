@@ -368,7 +368,7 @@ fn a_region_process_past_its_jobs_task_limit(
     const LIMIT: u64 = 2;
     let job = side.handle(nr::JOB_CREATE, &[reg(root), 0], "job_create failed")?;
     side.put(STATUS_AT, &LIMIT.to_ne_bytes())?;
-    side.call(
+    let _ = side.call(
         nr::JOB_SET_LIMIT,
         &[reg(job), ferrix_native_abi::types::JOB_TASKS, STATUS_AT],
     )
