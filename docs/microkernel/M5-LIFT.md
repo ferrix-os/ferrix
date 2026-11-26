@@ -502,7 +502,12 @@ objects. `lift/core/bridge.rs` is the edge, a thread per direction:
   (`ferrix-blkserve` 391), which answers `Pending` and takes the submissions when any wait, before
   every wait (296), a bell's key or not. No driver looks at its ring on its ring's key alone.
   The other direction, a driver's packet to a full local port ("port in", `spawn_in`), still ends
-  its carrier: a BACKLOG row, hold and retry, its own review.
+  its carrier (F-127, reserved; BACKLOG's row, ledger 10451, 10479). It fails no row because the cores
+  poll: net-ring's `Serving::rest` waits at most 20 ms (`RECHECK_NANOS`), the block ring rechecks every
+  50 ms, so a core whose bells stop is slowed to its recheck (a 32 MiB fetch 19.6 s against under a
+  second), never stopped; a driver waits with no deadline, which is why the bells out failed rows and
+  the bells in cannot. Neither of a port's Full answers is want of memory: its room is set aside at its
+  making (`object/port.rs` 141) and `push_fitting` never allocates (118-126).
 
 ## 12. Rows and figures (2026-11-04, x86-64 KVM, tip of `feature/mk-lift`)
 

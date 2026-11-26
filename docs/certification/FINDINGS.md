@@ -17,7 +17,7 @@ closes with W-8's boot slice 21b. **F-74** (2026-10-14, Moderate, the
 certification consultant's ledger 1057), the kernel writing no
 machine-check bank control (`MCG_CTL`, `MCi_CTL`), so whether an
 uncorrectable error is signalled as `#MC` at all rests on firmware's bank
-enables; closes by build plus argument and a BACKLOG hardware row. F-125, K14 failing open at no memory under `fast`, reserved 2026-11-26 (ledger 10291), filed with its fix. Until they are filed the tally above
+enables; closes by build plus argument and a BACKLOG hardware row. F-125, K14 failing open at no memory under `fast`, reserved 2026-11-26 (ledger 10291), filed with its fix. F-127, a user kernel's bridge that stops carrying a driver's packets to a core after one refusal at the core's port; a latency cliff while the cores recheck, no sighting in a row; Low; reserved 2026-11-26 (ledger 10451), filed with its fix. Until they are filed the tally above
 does not count them. (F-58, reserved here on 2026-10-02, and F-64, reserved
 on 2026-10-05, are filed below.)
 

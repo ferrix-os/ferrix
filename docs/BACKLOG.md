@@ -716,12 +716,22 @@ log path and commit; a new sighting is added to its row the day it is seen.
   (`-pb-x86`, `-pb-a64`), and the stand-in (`Ok(()) => return`) FIRED (`-stand-x86`). B's arena-floor lead
   (ledger 10191 H6: `n27b-f1-net583`, `n27b-f1-plant4`) is the same defect: both printed the bell line. `x86_64`
   joins `personality=user`'s `built_on` only by its own data-and-test commit and review (10333 P7).
-* The bridge's "port in" carrier (`lift/core/bridge.rs`, `spawn_in`) ends on a full local port, as "port out"
-  did before BACKLOG 603's fix (ledger 7576, 10333 P1): hold the packet and retry until the local port has
-  room, so that back-pressure reaches the driver's kernel port as `SHOULD_WAIT` does in the hybrid, with a
-  case; its own review. Reaches every core that exports a port to a driver (net, block, display, render,
-  input, audio); virtio-net's completion bell to its core's port is this side, `let _` on a refusal. Unowned: it
-  gets an owner before `x86_64` is asked into `personality=user`'s `built_on` (ledger 10333 P7, 10442).
+* **The bridge's "port in" carrier (`lift/core/bridge.rs`, `spawn_in`) ends on the first refusal at a core's port,
+  F-127 (reserved, Low; owner sebastian-27c; ledger 10451, 10479: PARKED behind WZ.6 and `max`'s own rows).**
+  As "port out" did before BACKLOG 603's fix (7576, 10333 P1). Measured on develop 9397a14ed, fast's values ad hoc,
+  x86-64 KVM, every port-in carrier ended at its first packet: `n27c-pi-dead-net` test-net PASSED with the 32 MiB
+  speed fetch in 19.6 s against 0.43 to 1.18 s healthy (`n27c-f7-net-x86-1`, `-2`, `n27c-f6-net-x86-3`,
+  `n27c-p-3`); `n27c-pi-dead-btrfs` test-btrfs PASSED. The cores do not depend on the driver's bells: net-ring's
+  `Serving::rest` waits at most `RECHECK_NANOS`, 20 ms (`extensions/device/net-ring/src/interfaces/net_ring/mod.rs`
+  79, 875-879), the block ring rechecks every 50 ms (`personality/linux/src/interfaces/block_ring/mod.rs` 151): a
+  latency cliff, no data lost, no hang, no row failing. E1, read: a port's room is set aside at its making
+  (`object/port.rs` 141, `try_deque_with_capacity(PORT_CAPACITY)`), `push_fitting` never allocates (118-126), and
+  `queue_user` answers Full only at `users >= PORT_CAPACITY` (163-164) or when the reserved room is used (172-173):
+  neither Full is want of memory. When taken up (J2): drop and count, port out's rule, if every queue into a core's
+  port is shown by reading to be a bell the core's recheck bounds; hold and retry (10451) if any data crosses. The
+  control that fires (J3): the plant also turns the core's recheck off for the bridge under test. The driver
+  ending while a packet is held is a case, not a control (J4). virtio-net's completion bell to its core's port is
+  this side, `let _` on a refusal. The x86_64 flip's request (10333 P7) names this row's state.
 * ~~`fault_ahead`'s five controls of 6537, A7, on this tree, with L.object.314's tag~~ **done 2026-11-26**
   (sebastian-27c, ledger 10259): on develop under `--personality user --set fault_ahead=on`, x86-64 KVM and
   AArch64 TCG, `test-threads --smp 2` PASSED and every control FIRED (`n27c-fc-*` on 74f29e33c, first `n27c-fa-*` on de7f2378f): rights, the file's end shared
