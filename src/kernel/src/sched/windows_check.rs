@@ -180,16 +180,26 @@ pub(crate) fn judge_requested(ask: Option<u64>, now: u64) {
 static TR_PICK_AT: [AtomicU64; 400] = [const { AtomicU64::new(0) }; 400];
 static TR_PICK_ID: [AtomicU64; 400] = [const { AtomicU64::new(0) }; 400];
 static TR_PICKS: AtomicU64 = AtomicU64::new(0);
+static TR_PICK_ASKED: [AtomicU64; 400] = [const { AtomicU64::new(0) }; 400];
+static TR_PICK_RAN: [AtomicU64; 400] = [const { AtomicU64::new(0) }; 400];
+static TR_PENDING: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
 static TR_IDS: [AtomicU64; THREADS] = [const { AtomicU64::new(u64::MAX) }; THREADS];
 pub(crate) fn note_pick(class: &super::queue::Tier<Arc<Task>>) {
     if on_held() && class.part().is_some() {
         let n = TR_PICKS.fetch_add(1, Ordering::Relaxed) as usize;
-        if let (Some(at), Some(id)) = (TR_PICK_AT.get(n), TR_PICK_ID.get(n)) {
-            at.store(crate::timer::now_nanos(), Ordering::Relaxed);
-            id.store(
-                class.current().map_or(0, |task| task.id + 1),
-                Ordering::Relaxed,
-            );
+        if let (Some(at), Some(id), Some(asked)) =
+            (TR_PICK_AT.get(n), TR_PICK_ID.get(n), TR_PICK_ASKED.get(n))
+        {
+            // (a) the instant the class decided with; (b) the deadline last handed to the timer.
+            at.store(class.now(), Ordering::Relaxed);
+            asked.store(crate::timer::requested_here(), Ordering::Relaxed);
+            let picked = class.current().map_or(0, |task| task.id + 1);
+            id.store(picked, Ordering::Relaxed);
+            if let Some(index) =
+                (0..THREADS).find(|&i| TR_IDS[i].load(Ordering::Relaxed) + 1 == picked)
+            {
+                TR_PENDING[index].store(n as u64 + 1, Ordering::Relaxed);
+            }
         }
     }
     if !on_held() || class.part().is_none() {
@@ -238,6 +248,13 @@ pub(crate) fn note_pick(class: &super::queue::Tier<Arc<Task>>) {
 
 fn sample(index: usize) {
     let now = crate::timer::now_nanos();
+    // (c): the picked task's first stamp after the pick.
+    if let Some(pending) = TR_PENDING.get(index) {
+        let n = pending.swap(0, Ordering::Relaxed);
+        if let Some(ran) = n.checked_sub(1).and_then(|n| TR_PICK_RAN.get(n as usize)) {
+            ran.store(now, Ordering::Relaxed);
+        }
+    }
     let epoch = EPOCH.load(Ordering::Acquire);
     let (start, end) = window_of(PARTITION.get(index).copied().unwrap_or(0));
     let phase = now.saturating_sub(epoch) % MAJOR;
@@ -1139,13 +1156,17 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
                     .find(|&i| TR_IDS[i].load(Ordering::Relaxed) + 1 == id)
                     .map_or("other", |i| NAMES[i])
             };
-            if name != last_name || name == "idle" {
+            {
                 use core::fmt::Write;
+                let asked = TR_PICK_ASKED[n].load(Ordering::Relaxed) as i64 - epoch;
+                let ran = TR_PICK_RAN[n].load(Ordering::Relaxed);
+                let ran = if ran == 0 { -1 } else { ran as i64 - epoch };
                 let _ = write!(
                     line,
-                    " {}.{:03}:{}",
-                    at / 1_000_000,
-                    (at.rem_euclid(1_000_000)) / 1000,
+                    " {}/{}/{}:{}",
+                    at / 1000,
+                    asked / 1000,
+                    ran / 1000,
                     name
                 );
                 last_name = name;
