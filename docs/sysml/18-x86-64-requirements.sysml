@@ -4147,8 +4147,8 @@ package FerrixX8664Requirements {
         requirement <'L.x86_64.274'> aFastResumeKeepsEveryRule : ItemLowLevel {
             attribute :>> statement = "RESTRICTED_RESUME shall go back in by the fast path only after a SYSCALL
                 exit with the mark up, raising the barrier's mark first.";
-            attribute :>> criterion = "restricted-check's cases 144 (a barrier per exit over RESUME-only
-                trips, under exit) and 170 (FS: normal mode's base zero, the program's across
+            attribute :>> criterion = "restricted-check's cases 144 (barriers equal to one per exit plus
+                one per switch counted, over RESUME-only trips, under exit) and 170 (FS: normal mode's base zero, the program's across
                 fast trips), in an image built restricted_fastpath=on (K1.md §7.1, ledger 7363).";
             attribute :>> parent = "H.TRAP.24";
             attribute :>> unit = ("arch::x86_64::restricted::fast_resume",

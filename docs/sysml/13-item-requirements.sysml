@@ -1534,8 +1534,9 @@ package FerrixItemRequirements {
                 restricted mode, and each exit shall keep the speculation rule the
                 build selects, with the barrier counted.";
             attribute :>> criterion = "The `regions` line on every boot of x86-64: restricted-check holds
-                every case; the vector case, and one barrier decided per exit,
-                none per entry, under `exit`.";
+                every case; the vector case, and barriers decided equal to one per
+                exit plus one per switch counted away from a trip that had not
+                exited, none per entry, under `exit`.";
             attribute :>> parent = ("O.ISOLATE");
         }
     }

@@ -732,10 +732,10 @@ pub fn exit_barrier_offered() -> bool {
 }
 
 // CHECKS-ONLY: syscall/region_check.rs
-/// Barriers decided and issued at restricted exits, on every processor
-/// (`docs/microkernel/K1.md` §6, §10).
+/// Barriers decided and issued at restricted exits, on every processor, and of those decided
+/// the ones decided at a switch (`docs/microkernel/K1.md` §6, §10; fl-093).
 #[doc(hidden)]
-pub fn restricted_barriers() -> (u64, u64) {
+pub fn restricted_barriers() -> (u64, u64, u64) {
     arch::restricted_barriers()
 }
 

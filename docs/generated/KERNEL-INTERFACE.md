@@ -3105,10 +3105,10 @@ checks above is `pub` for raised checks (F3).
 | `CpuTime::busy_ns` | field | load |  |
 | `CpuTime::idle_ns` | field | load |  |
 | `CpuTime::runnable` | field | item, load |  |
-| `CpuTime::switches` | field | load, bin |  |
+| `CpuTime::switches` | field | item, load, bin |  |
 | `PreparedTask::launch` | method | load, bin |  |
 | `PreparedTask::try_launch` | method | load |  |
-| `Summary::switches` | field | load, bin |  |
+| `Summary::switches` | field | item, load, bin |  |
 | `SyncPlaced::COUNT` | associated const | load (checks) |  |
 | `SyncPlaced::NAMES` | associated const | load (checks) |  |
 
@@ -3148,7 +3148,7 @@ checks above is `pub` for raised checks (F3).
 | `Report::spent_ms` | field | load, bin |  |
 | `Report::spinners` | field | bin |  |
 | `Report::steals` | field | bin |  |
-| `Report::switches` | field | load, bin |  |
+| `Report::switches` | field | item, load, bin |  |
 | `Report::threads` | field | load, bin |  |
 | `Report::worst_lag` | field | bin |  |
 
@@ -3252,7 +3252,7 @@ checks above is `pub` for raised checks (F3).
 | `Task::request_ns` | method | load |  |
 | `Task::runtime` | method | item, load |  |
 | `Task::state` | method | item, load, bin |  |
-| `Task::switches` | method | load, bin |  |
+| `Task::switches` | method | item, load, bin |  |
 | `Task::take_reply` | method | item |  |
 | `Task::thread` | method | item, load |  |
 | `Task::user_state` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |

@@ -808,6 +808,9 @@ const ASK_EDF_DECLINED: u8 = 54;
 /// Read the count of direct switches, where the image has them.
 #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
 const ASK_DIRECT_START: u8 = 45;
+/// [`ASK_COUNT_END`] for a span a switch cut on purpose: at least one switch counted too
+/// (case 198; fl-093, ledger 8776, 10859 K7).
+const ASK_COUNT_END_SWITCHED: u8 = 55;
 /// Whether it moved by the word; yes in an image without them, where the case's call
 /// goes the general way.
 #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
@@ -845,11 +848,19 @@ fn asking_task(side: &Side) -> Result<Option<Arc<crate::sched::Task>>, &'static 
     not(all(ferrix_fast_restricted, ferrix_checks = "on")),
     allow(unused_variables, reason = "its use is under the same cfg")
 )]
-fn count_end(started: (u64, u64), refills_started: u64, word: u64, report: &mut Report) -> bool {
-    let (decided, issued) = crate::trap::restricted_barriers();
+fn count_end(
+    started: (u64, u64, u64),
+    (refills_started, switches_wanted): (u64, u64),
+    word: u64,
+    report: &mut Report,
+) -> bool {
+    let (decided, issued, switched) = crate::trap::restricted_barriers();
     report.barriers = decided - started.0;
+    // A trip a switch cut in two decided one barrier at the switch and one at its exit
+    // (fl-093, ledger 8776): those are counted apart and held to exactly, never a bare >=.
+    let switches = switched - started.2;
     report.exits = word;
-    report.issued = issued - started.1 == word;
+    report.issued = issued - started.1 == word + switches;
     // What was issued against what the processor offers, not against the
     // exit's own answer: a machine with no IBPB issues none.
     let decided_here = if crate::trap::exit_barrier_built() {
@@ -857,8 +868,17 @@ fn count_end(started: (u64, u64), refills_started: u64, word: u64, report: &mut 
     } else {
         0
     };
-    let held =
-        report.barriers == decided_here && report.issued == crate::trap::exit_barrier_offered();
+    let switches_here = if crate::trap::exit_barrier_built() {
+        switches
+    } else {
+        0
+    };
+    // A span cut on purpose must show its cut where the build decides a barrier there.
+    let cut = !crate::trap::exit_barrier_built() || switches >= switches_wanted;
+    let held = report.barriers == decided_here + switches_here
+        && switches == switches_here
+        && cut
+        && report.issued == crate::trap::exit_barrier_offered();
     // Where the root write empties nothing, each of them refilled (6747 (1d)).
     #[cfg(all(ferrix_fast_restricted, ferrix_checks = "on"))]
     let held = held && {
@@ -877,9 +897,10 @@ fn count_end(started: (u64, u64), refills_started: u64, word: u64, report: &mut 
         // A shortfall is a missed barrier; over is read as a preempted trip
         // (`docs/backlog/flakes.md`, fl-093). Which it was must be on the line.
         crate::console::println!(
-            "  restricted barrier count: {} decided, {} wanted, issued {}, offered {}",
+            "  restricted barrier count: {} decided, {} wanted, {} at switches, issued {}, offered {}",
             report.barriers,
             decided_here,
+            switches,
             report.issued,
             crate::trap::exit_barrier_offered()
         );
@@ -1027,7 +1048,7 @@ fn serve(
     shared: &Arc<AddressSpace>,
     report: &mut Report,
 ) -> Result<(), &'static str> {
-    let mut started = (0, 0);
+    let mut started = (0, 0, 0);
     let mut row_started = 0;
     let mut row_scale = (0, 1);
     let mut window = WindowAsks::default();
@@ -1071,10 +1092,11 @@ fn serve(
                 }
                 true
             }
-            ASK_COUNT_END => {
+            ASK_COUNT_END | ASK_COUNT_END_SWITCHED => {
                 #[cfg(not(all(ferrix_fast_restricted, ferrix_checks = "on")))]
                 let refills_started = 0;
-                count_end(started, refills_started, word, report)
+                let switched = u64::from(what == ASK_COUNT_END_SWITCHED);
+                count_end(started, (refills_started, switched), word, report)
             }
             ASK_PIN => pin(side, word)?,
             ASK_ON_PROCESSOR => on_processor(side, word)?,

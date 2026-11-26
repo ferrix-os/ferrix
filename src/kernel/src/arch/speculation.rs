@@ -325,6 +325,10 @@ const EXIT_BARRIER: bool = !cfg!(ferrix_partition_speculation = "partition");
 static RESTRICTED_RAN: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];
 /// Barriers each processor has decided at a restricted exit.
 static RESTRICTED_DECIDED: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
+/// Of [`RESTRICTED_DECIDED`], those decided at a switch away from restricted code that had
+/// not exited (a preempted or blocked trip), not at an exit: the check counts them apart
+/// (fl-093, ledger 8776, 10859 K7).
+static RESTRICTED_SWITCHED: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 /// Barriers each processor has issued at a restricted exit: `machine` says it
 /// did, which a model with no `IBPB` does not.
 static RESTRICTED_ISSUED: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
@@ -341,7 +345,26 @@ pub(crate) fn restricted_ran() {
 /// restricted code ran here last, the barrier the build's rule asks (K1 §6).
 /// None on entry. With interrupts masked.
 #[inline(always)]
+#[cfg_attr(
+    not(ferrix_personality = "user"),
+    allow(
+        dead_code,
+        reason = "its callers, the restricted exits, are reached in a user kernel alone"
+    )
+)]
 pub(crate) fn restricted_left() {
+    restricted_left_counted(false);
+}
+
+/// [`restricted_left`] at a switch: the barrier is the same, and counted apart as well, so
+/// that a trip the switch cut in two reads as one more barrier with its switch beside it.
+#[inline(always)]
+pub(crate) fn restricted_left_at_switch() {
+    restricted_left_counted(true);
+}
+
+#[inline(always)]
+fn restricted_left_counted(at_switch: bool) {
     let cpu = this_cpu();
     let Some(ran) = RESTRICTED_RAN.get(cpu) else {
         return;
@@ -355,6 +378,9 @@ pub(crate) fn restricted_left() {
     }
     if let Some(decided) = RESTRICTED_DECIDED.get(cpu) {
         count_here(decided);
+    }
+    if at_switch && let Some(switched) = RESTRICTED_SWITCHED.get(cpu) {
+        count_here(switched);
     }
     if machine::exit_barrier(cpu)
         && let Some(issued) = RESTRICTED_ISSUED.get(cpu)
@@ -439,16 +465,20 @@ pub(crate) fn restricted_left_here(cpu: usize) {
     }
 }
 
-/// Barriers decided and issued at restricted exits, on every processor: for
-/// the check's count (K1 §6, §10).
-pub(crate) fn restricted_barriers() -> (u64, u64) {
+/// Barriers decided and issued at restricted exits, on every processor, and of those decided
+/// the ones a switch decided: for the check's count (K1 §6, §10; fl-093).
+pub(crate) fn restricted_barriers() -> (u64, u64, u64) {
     let sum = |counters: &[AtomicU64; MAX_CPUS]| {
         counters
             .iter()
             .map(|counted| counted.load(Ordering::Relaxed))
             .sum()
     };
-    (sum(&RESTRICTED_DECIDED), sum(&RESTRICTED_ISSUED))
+    (
+        sum(&RESTRICTED_DECIDED),
+        sum(&RESTRICTED_ISSUED),
+        sum(&RESTRICTED_SWITCHED),
+    )
 }
 
 /// Add one to `counter`, a word of this processor's that only it writes,

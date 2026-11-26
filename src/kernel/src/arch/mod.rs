@@ -42,8 +42,8 @@ pub use speculation::{
     switch_barriers, switch_barriers_on,
 };
 pub(crate) use speculation::{
-    answer_leaving, entering_space, leaving_domain, left_space, nospec_below, restricted_left,
-    restricted_ran, serve_wanted_barrier,
+    answer_leaving, entering_space, leaving_domain, left_space, nospec_below,
+    restricted_left_at_switch, restricted_ran, serve_wanted_barrier,
 };
 pub use speculation::{
     forget_hook_armed_by, leave_hook_armed_by, report_exposure as report_speculation,

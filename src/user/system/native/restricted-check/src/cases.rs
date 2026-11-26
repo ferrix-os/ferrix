@@ -58,6 +58,9 @@ const ASK_TWO_PROCESSORS: u8 = 13;
 const ANY_PROCESSOR: u64 = u64::MAX;
 /// The barrier count must have moved since [`ASK_COUNT_START`].
 const ASK_COUNT_MOVED: u8 = 5;
+/// [`ASK_COUNT_END`] for a span a switch cut on purpose: the word's exits plus the switches
+/// counted, and at least one switch (fl-093, ledger 8776, 10859 K7).
+const ASK_COUNT_END_SWITCHED: u8 = 55;
 /// Nothing: a blocking round trip.
 const ASK_NOTHING: u8 = 6;
 /// The counter's reading now, for the check to scale the row by.
@@ -1337,7 +1340,7 @@ extern "C" fn spinner(_argument: usize) -> ! {
     }
 }
 
-/// Cases 124 to 126: a thread preempted in restricted mode comes back there,
+/// Cases 124 to 126 and 198: a thread preempted in restricted mode comes back there,
 /// and a switch from it to a normal-mode thread of the same process is an exit
 /// by another name (`docs/microkernel/K1.md` §6, `L.x86_64.276`): pinned to one
 /// processor, this thread's wakes count barriers with no exit in the window.
@@ -1383,7 +1386,11 @@ fn preempted(given: &Given) -> Result<(), i32> {
         }
         core::hint::spin_loop();
     }
-    hold(SPINNER_DONE.load(Acquire) == 2, 126)
+    hold(SPINNER_DONE.load(Acquire) == 2, 126)?;
+    // Case 198: the span held a trip cut by a switch on purpose, the spinner's, and its one
+    // exit, the kick's: barriers decided equal that exit plus every switch counted, one at
+    // least, never a bare at-least.
+    ask(given, ASK_COUNT_END_SWITCHED, 1, None).map_err(|_| 198)
 }
 
 /// A stack for [`waiter`].

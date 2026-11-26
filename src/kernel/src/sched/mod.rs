@@ -3978,7 +3978,7 @@ fn swap_address_space(previous_task: &Task, next_task: &Task) {
                     "a switch between normal-mode threads found restricted code's mark up"
                 );
             }
-            arch::restricted_left();
+            arch::restricted_left_at_switch();
         }
     }
 }

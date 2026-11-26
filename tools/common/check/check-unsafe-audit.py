@@ -66,6 +66,11 @@ are host tests and never in the image -- are item files here, named by their
 path from the repository root. Both are `#![forbid(unsafe_code)]` today, so
 they hold no site; the scope is so that the first one is traced.
 
+linuxd's lift core (`src/kernel/src/lift/`, compiled into linuxd alone, out of
+the item's rings) carries its `unsafe` by rules 1-3, a `// SAFETY:` comment at
+each site, and no obligation id: it is no item file, so rule 5's baseline does not
+name it (ledger 10906, F-129's give_back_stack).
+
 Two more rules follow:
 
   4. An id anywhere in the tree must be one the registry defines. An id that
