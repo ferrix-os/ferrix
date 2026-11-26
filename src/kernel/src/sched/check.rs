@@ -172,6 +172,12 @@ static STOP: AtomicBool = AtomicBool::new(false);
 /// Where the checking task waits for a phase to end.
 static FINISHED: WaitQueue = WaitQueue::new();
 
+/// The cases of [`run`] that judge the fair class (shares, weights, slices, lag), left out under
+/// `schedule=windows`, where no task is on a fair run queue (ledger 7460 WN.8). Each is named in
+/// the boot's `windows` line; `docs/microkernel/K9.md` §4.1 gives each one's reason.
+#[cfg(ferrix_schedule = "windows")]
+pub(crate) const FAIR_ONLY: &[&str] = &["slice_check", "fairness", "slice_scaling"];
+
 /// Run them.
 ///
 /// # Errors
@@ -217,6 +223,7 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     a_waiter_drained_as_it_is_listed_is_woken(topology)?;
     super::mark_check::run(topology)?;
     super::deadline_check::run()?;
+    #[cfg(not(ferrix_schedule = "windows"))]
     super::slice_check::run(topology)?;
     super::affinity_check::run(topology)?;
     mark!(0);
@@ -225,6 +232,7 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     mark!(1);
     many_tasks(topology, &mut report)?;
     mark!(2);
+    #[cfg(not(ferrix_schedule = "windows"))]
     fairness(topology, &mut report)?;
     mark!(3);
     placement(topology, &mut report)?;
@@ -236,6 +244,7 @@ pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     a_pulled_task_runs(topology)?;
     balancing(topology, &mut report)?;
     mark!(7);
+    #[cfg(not(ferrix_schedule = "windows"))]
     slice_scaling(&mut report)?;
     a_woken_task_is_placed_on_an_idle_processor(topology)?;
     a_wakee_is_pulled_onto_its_wakers_processor(topology)?;

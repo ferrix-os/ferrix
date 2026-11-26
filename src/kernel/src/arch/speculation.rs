@@ -562,7 +562,8 @@ pub(crate) fn leaving_domain(domain: u64) {
 
 /// Put `domain` in a free slot of [`LEAVING`] and answer the slot. When every
 /// slot is held, each by a leave that gives it back after one grace period,
-/// yield until one is: the caller may block.
+/// give way until one is: the caller may block. A slot's holder may be any level of any
+/// partition, so under `schedule=windows` the wait sleeps rather than yields (K9 §4.1).
 fn publish_leaving(domain: u64) -> usize {
     loop {
         for (slot, leaving) in LEAVING.iter().enumerate() {
@@ -573,7 +574,7 @@ fn publish_leaving(domain: u64) -> usize {
                 return slot;
             }
         }
-        crate::sched::yield_now();
+        crate::sched::give_way();
     }
 }
 

@@ -14,17 +14,17 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 196 | 141 | 55 |
-| Low (`L.*`) | 1559 | 1279 | 280 |
+| High (`H.*`) | 198 | 143 | 55 |
+| Low (`L.*`) | 1578 | 1298 | 280 |
 
-3580 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3594 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3589 |
-| Accessors, covered by the requirement they serve | 1531 |
+| Named by a low-level requirement | 3603 |
+| Accessors, covered by the requirement they serve | 1588 |
 | Check code in a product file | 133 |
-| Named by none | 1174 |
+| Named by none | 1223 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -178,7 +178,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | ASR-5 | `H.MEM.6` |
 | ASR-6 | `H.DEV.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.15`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5`, `H.FAIL.8`, `H.FAIL.9`, `H.FAIL.10`, `H.FAIL.12`, `H.FAIL.13`, `H.FAIL.14`, `H.FAIL.11` |
 | ASR-7 | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.5`, `H.SIGN.1`, `H.SIGN.2`, `H.SIGN.3`, `H.SIGN.4`, `H.SIGN.5`, `H.SIGN.6`, `H.SIGN.7` |
-| ASR-8 | `H.SCHED.1`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.5`, `H.SCHED.13`, `H.SCHED.16`, `H.SCHED.18`, `H.SCHED.28` |
+| ASR-8 | `H.SCHED.1`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.5`, `H.SCHED.13`, `H.SCHED.16`, `H.SCHED.18`, `H.SCHED.28`, `H.SCHED.26`, `H.SCHED.27` |
 | ASR-9 | `H.STORE.2`, `H.STORE.3`, `H.STORE.4`, `H.STORE.5`, `H.STORE.6`, `H.STORE.7`, `H.STORE.8` |
 | G.1 | `H.SCHED.1`, `H.SCHED.4`, `H.SCHED.5`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.SCHED.13`, `H.SCHED.14`, `H.SCHED.15` |
 | G.3 | `H.TRAP.9` |
@@ -306,6 +306,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `H.SCHED.16` | A task of one job, woken while a ring-3 load of another job saturates every processor, shall be running within the phase's bound in tools/common/xtask/src/stall.rs for that load: what the load's requests make the kernel do on its behalf -- holding a lock, freeing what its tasks left -- shall not keep other jobs' tasks off every processor (finding F-95). | cargo xtask test-stall: 10 ms sleepers, one pinned to each processor and one free, beside each load phase, within the phase's bound in tools/common/xtask/src/stall.rs in a run whose quiet phases are within theirs; until a phase is asserted there, it is reported, and docs/PREEMPTIBLE-WAITS.md section 7 says which. | ASR-8, O.QUOTA | *baselined* | — | — | — |
 | `H.SCHED.18` | A processor taken out of service shall be left by every task and every movable interrupt, with no task stranded on it and none run there, no interrupt lost, none delivered there once its messages are moved -- between the park and the move it may still take one, and runs its handler -- no stale translation kept when it returns, and a park it never acknowledges undone by its deadline; only root, through cpuN/online, and lode, through the processor service token, may ask, each change audited. | cargo xtask test-quarantine and test-quarantine-smp2 (KVM): lode takes the target out after eleven core-scoped corrected records; nothing runs or is drained there; a reader blocked on an empty pipe is re-homed at its wake; its interrupts are moved and none lands there under disk traffic; the surface says so; the refused writes are refused; root brings it back; fifty times out and back under load. Negative controls (ledger 4932): the ACTIVE bit never cleared, the re-home removed, the retarget skipped, the park loop with interrupts masked, the capability check in the writer's own namespace -- each fires. | ASR-8 | `tools/common/xtask/src/quarantine.rs::test_quarantine` | xtask gate | xtask gate | xtask gate |
 | `H.SCHED.28` | Under schedule=edf a thread with the authority may hold a budget in each period on one processor: a set too wide for it shall be refused by name, the thread shall run no more than its budget in a period, the earliest deadline with budget shall run first, and the fair class shall have the rest. | L.sched.179 to L.sched.183. No timing claim. | ASR-8 | `src/kernel/src/sched/reserve_check.rs::run` | not built | not built | not built |
+| `H.SCHED.26` | Under schedule=windows, after the seal, a task shall run on a processor only inside a window of its own partition, and past the window's end only until the first pick after it, the overrun measured; a processor in a window with nothing of that partition runnable shall be idle. | L.sched.153 to L.sched.156, L.sched.163 to L.sched.169, L.sched.201. The overrun is judged within 500 us on x86-64 and printed on AArch64. | ASR-8 | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
+| `H.SCHED.27` | Under schedule=windows no first process shall start until the kernel's frame is sealed, and the seal shall refuse a frame that overlaps, overruns its major frame, names a processor out of service or leaves one with no partition-0 window. | L.sched.157 to L.sched.162, L.sched.170. | ASR-8 | `src/kernel/src/sched/windows_check.rs::after_seal` | not built | not built | not built |
 
 ### Interrupts (`H.IRQ`)
 
@@ -1104,6 +1106,25 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.181` | The pick shall be the earliest deadline among reservations with budget, then the fair class, whose tasks shall run whenever no reservation has budget; no steal, balance, push or direct switch shall pass over or move a reservation. | ferrix-sched-edf's host tests; the `edf` line's shares; test-reserve's `child`. Controls: the pick not by deadline, and the direct switch's decline removed. | H.SCHED.28 | `sched::queue::CpuQueue::pick_next`, `sched::direct::begin` | `src/kernel/src/sched/reserve_check.rs::run` | not built | not built | not built |
 | `L.sched.182` | THREAD_RESERVE shall act on the calling thread alone, on a job handle with SET_LIMIT at or above its own job, and shall answer NOT_SUPPORTED in a kernel without schedule=edf; three zeros shall give the reservation back. | test-reserve's `admitted`, `other`, `back`. Control: the walk up the jobs removed lets a job's handle from beside it through. | H.SCHED.28 | `syscall::native::lift::thread_reserve` | *baselined* | — | — | — |
 | `L.sched.183` | A reserved thread's mask shall not change; its share shall come back when it is freed, wherever it stands, and when it gives it back, and until its next way off the processor it shall not enter the fair class's queue; a child shall not inherit it. | The `edf` line's `used` and its child; test-reserve's `affinity`, `child`, `back`. | H.SCHED.28 | `sched::reserve::forget`, `sched::reserve::give_back`, `sched::affinity::set_affinity` | `src/kernel/src/sched/reserve_check.rs::run` | not built | not built | not built |
+| `L.sched.153` | A window's pick shall read only its partition's set. | windows_check::run's samples, failure line `windows: a task ran outside its window past the pick that ended it` (and `... and no pick after the window's end was logged`, `... before its first one, or past the frames kept`), and `windows: a task never ran in its window`; the host test a_window_runs_only_its_partition_and_idles_when_empty. Control: the pick ignores the window. | H.SCHED.26 | `sched::queue::CpuQueue::pick_next` | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
+| `L.sched.154` | A processor with no runnable task of the window's partition shall be idle and halt; has_work shall read the window's partition alone. | windows_check::run's gap looks, failure lines `windows: a processor in a gap read another partition's task as work`, `windows: no look found the held processor in a gap with work queued` and, in partition 0's window, `windows: has_work was never read false in partition 0's window with the partition-2 task queued`. Control: is_empty read for has_work. | H.SCHED.26 | `sched::queue::CpuQueue::has_work` | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
+| `L.sched.155` | Within a partition a higher level shall preempt a lower at once. | The host tests; windows_check::run, failure line `windows: a lower level ran while a higher one was runnable`. | H.SCHED.26 | `sched::queue::CpuQueue::pick_next` | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
+| `L.sched.156` | Equal levels shall take turns of one 2 ms quantum, counted in running time, its remainder kept across a window's end. | The host tests; windows_check::run, failure line `windows: equals did not take turns`. | H.SCHED.26 | `sched::queue::CpuQueue::pick_next` | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
+| `L.sched.157` | The seal shall refuse overlapping windows on one processor. | windows_check's case. Control: the seal accepts overlap. | H.SCHED.27 | `sched::windows::set_window` | `src/kernel/src/sched/windows_check.rs::refusals` | not built | not built | not built |
+| `L.sched.158` | The seal shall refuse a window past major_ns. | windows_check's case. | H.SCHED.27 | `sched::windows::check_seal` | `src/kernel/src/sched/windows_check.rs::refusals` | not built | not built | not built |
+| `L.sched.159` | The seal shall refuse a window on a processor out of service, and a processor in service with no partition-0 window of 500 us. | windows_check's cases. | H.SCHED.27 | `sched::windows::check_seal` | `src/kernel/src/sched/windows_check.rs::refusals` | not built | not built | not built |
+| `L.sched.160` | A second seal and a window after the seal shall be refused, and a frame shall not be taken off once the boot's is sealed. | windows_check's after-seal cases. Controls: the merged pick read after the seal; a frame taken off after the seal. | H.SCHED.27 | `sched::windows::seal`, `sched::windows::uninstall_check` | `src/kernel/src/sched/windows_check.rs::after_seal` | not built | not built | not built |
+| `L.sched.161` | Unsealed, the boot authority shall start no first process (FX-0927). | test-flags: xtask's seal_order_problem requires the seal's line before the first line of any first process (partmgr's, devmgr's, linuxd's), by order, failure line `under schedule=windows a first process's line came before the seal's`; the stage panic. Control: an unsealed first process allowed. | H.SCHED.27 | `boot_authority::run`, `sched::windows::seal_default` | `tools/common/xtask/src/check.rs::test_flags` | xtask gate | xtask gate | xtask gate |
+| `L.sched.162` | A job's partition shall be its parent's at its making; a partition shall be refused for a job with a thread or child, or not a child of the root, and partition 0 for any job. | windows_check's job cases. | H.SCHED.27 | `sched::windows::assign`, `object::job::Job::partition`, `object::job::Job::set_partition` | `src/kernel/src/sched/windows_check.rs::jobs` | not built | not built | not built |
+| `L.sched.163` | A kernel thread and a task with no job shall run in partition 0 alone. | windows_check::run, failure line `windows: a kernel thread is not in partition 0` (the check's own thread, and each it makes before it rehomes one); the check's threads re-homed only by its own body. Control: a kernel thread placed outside partition 0. | H.SCHED.26 | `sched::task::Task::new` | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
+| `L.sched.164` | A wake of a task of another partition than the window's at the wake's own instant shall send no kick, nor place the task on a processor whose window then does not admit its partition; one into the open window's partition shall kick as before. | windows_check::run, failure lines `windows: no wake into another partition's window was left unkicked`, `windows: a wake in partition 0's window kicked the halted processor` and `windows: a wake in partition 0's window decided no kick, suppressed or sent`; the host test a_wake_reads_the_window_at_its_own_instant (a class last told the time in an earlier frame's window). Control: the wake kicks across. | H.SCHED.26 | `sched::wake_at_home`, `sched::wake_onto`, `sched::place_on_idle` | `src/kernel/src/sched/windows_check.rs::run`, `src/lib/kernel/sched-windows/src/tests.rs::a_wake_reads_the_window_at_its_own_instant` | host test | host test | host test |
+| `L.sched.165` | hand_over across partitions, or to a peer the window may not run, shall decline. | windows_check::run under ipc_fastpath=on (the hand-over is built only there), failure lines `windows: hand_over across partitions was accepted` and `... never reached its partitions' test`; the declined count. Without the fast path the line says no hand-over is built. Control: hand_over across partitions accepted. | H.SCHED.26 | `sched::direct::begin` | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
+| `L.sched.166` | Steal, balance, push and the wake's pull shall move only a task of the destination's current partition. | windows_check::run's looks through latest_where, the body steal_candidate asks, failure lines `windows: steal could take a task of a partition whose window was not open` and `windows: no look found a task steal could take`; the host test steal_sees_the_window_alone. Control: a steal of another partition's task. | H.SCHED.26 | `sched::queue::CpuQueue::steal_candidate` | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
+| `L.sched.167` | The overrun at each window's end shall be measured as the time to the pick that ended it, every sample outside a window shall lie before that pick, and the worst shall be printed. | windows_check::run's line prints the worst overrun over the windows a task ran past, the last sample past the end, with the pick's distance beside it and a late pick after a last sample within the bound counted as a stall (ledger 7732); on x86-64 failure line `windows: a window's end was overrun past its bound` (500 us); AArch64 prints it unjudged. A window that ends with nothing of it running prints its late pick as the worst start delay, counted and not judged (ledger 7714 WJ.1-WJ.2). | H.SCHED.26 | `sched::windows::overruns` | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
+| `L.sched.168` | Under schedule=windows no task shall be on a fair run queue, and RunQueue's pick shall not be in the kernel. | check-kernel-shape.py's symbols; the boot's type check. Control: the fair class's symbols planted. | H.SCHED.26 | `sched::queue::CpuQueue::pick_next` | `tools/common/xtask/src/kernel_shape.rs::test_kernel_shape` | xtask gate | xtask gate | xtask gate |
+| `L.sched.169` | A task's level shall be its nice's, every server's above every program's, and a cpu.weight write shall be refused. | The level, in two halves. Its order: the host test every_programs_level_is_beneath_every_servers over ferrix_sched_windows::level_of, the body sched::windows::level_of calls, for nice -20 to 19 as a program against every server's level, failure line `a program's level is not beneath every server's`. Its liveness: test-threads' sched-policy step, linuxd answering beside nice -20 spinners, failure line `the threads test's sched-policy step (linuxd beside nice -20 spinners) did not end` or the step's own. The cpu.weight refusal: object::rehome_check::check_the_weight under windows, failure line `a job's weight was accepted under windows`. Controls: programs' levels not beneath the servers'; cpu.weight accepted. | H.SCHED.26 | `sched::windows::level_of`, `ferrix_sched_windows::level_of`, `object::quota::unshared` | `src/kernel/src/object/rehome_check.rs::check_the_weight`, `src/lib/kernel/sched-windows/src/tests.rs::every_programs_level_is_beneath_every_servers`, `tools/common/xtask/src/threads.rs::test_threads` | xtask gate | xtask gate | xtask gate |
+| `L.sched.170` | A processor back in service after the seal shall take its sealed row, or be refused. | The accepted half: windows_check::after_seal, each processor in service holds its sealed row and may come back. The refused half: the host test a_processor_with_no_sealed_row_may_not_return, through Windows::may_return, the body sched::windows::may_return calls. | H.SCHED.27 | `sched::put_back_in_service`, `sched::windows::may_return` | `src/kernel/src/sched/windows_check.rs::after_seal`, `src/lib/kernel/sched-windows/src/tests.rs::a_processor_with_no_sealed_row_may_not_return` | host test | host test | host test |
+| `L.sched.201` | Under schedule=windows the timer shall be asked for each window's end, or a quantum's end before it, and what reaches the timer shall be no later. | windows_check::run, every arm on the held processor: failure lines `windows: the deadline asked at a window's end is not the window's end` (the ask), `windows: the timer was asked later than the class's ask or the arm's floor` (what reached the timer) and `windows: no arm on the held processor was judged`; the line counts the arms the 20 us floor decided. Controls: a quantum past the window (the ask), the one-shot armed later (the timer). | H.SCHED.26 | `sched::queue::CpuQueue::arm_timer` | `src/kernel/src/sched/windows_check.rs::run` | not built | not built | not built |
 
 ### Discovery
 
@@ -3140,6 +3161,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/rehome_check.rs::check_sealed_tree` | kernel | H.OBJ.22 |
 | `src/kernel/src/object/rehome_check.rs::check_the_kernel_charge` | kernel | L.object.56 |
 | `src/kernel/src/object/rehome_check.rs::check_the_weight` | kernel | L.object.61 |
+| `src/kernel/src/object/rehome_check.rs::check_the_weight` | kernel | L.sched.169 |
 | `src/kernel/src/object/reserve_check.rs::check_a_reserved_give_back` | kernel | L.mm.147 |
 | `src/kernel/src/object/reserve_check.rs::check_the_heap_scope` | kernel | L.mm.140 |
 | `src/kernel/src/object/reserve_check.rs::run` | kernel | H.QUOTA.17 |
@@ -3221,6 +3243,10 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/sched/rehome_check.rs::check_switches_are_counted` | kernel | L.sched.83 |
 | `src/kernel/src/sched/reserve_check.rs::run` | kernel | H.SCHED.28, L.sched.179, L.sched.180, L.sched.181, L.sched.183 |
 | `src/kernel/src/sched/slice_check.rs::run` | kernel | L.sched.107, L.sched.108 |
+| `src/kernel/src/sched/windows_check.rs::after_seal` | kernel | H.SCHED.27, L.sched.160, L.sched.170 |
+| `src/kernel/src/sched/windows_check.rs::jobs` | kernel | L.sched.162 |
+| `src/kernel/src/sched/windows_check.rs::refusals` | kernel | L.sched.157, L.sched.158, L.sched.159 |
+| `src/kernel/src/sched/windows_check.rs::run` | kernel | H.SCHED.26, L.sched.153, L.sched.154, L.sched.155, L.sched.156, L.sched.163, L.sched.164, L.sched.165, L.sched.166, L.sched.167, L.sched.201 |
 | `src/kernel/src/sched/work/check.rs::run` | kernel | L.sched.32, L.sched.34 |
 | `src/kernel/src/service_check.rs::a_claim_is_refused_while_its_driver_lives` | kernel | L.claim.1, L.claim.5 |
 | `src/kernel/src/service_check.rs::a_claim_or_a_number_without_memory_is_refused` | kernel | L.claim.8 |
@@ -3668,6 +3694,9 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_box_units_and_qemus_are_of_versions_read_against` | host | L.iommu.59 |
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_queue_registers_name_slots_of_sixteen_bytes` | host | L.iommu.47 |
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_widest_walk_offered_is_taken` | host | L.iommu.60 |
+| `src/lib/kernel/sched-windows/src/tests.rs::a_processor_with_no_sealed_row_may_not_return` | host | L.sched.170 |
+| `src/lib/kernel/sched-windows/src/tests.rs::a_wake_reads_the_window_at_its_own_instant` | host | L.sched.164 |
+| `src/lib/kernel/sched-windows/src/tests.rs::every_programs_level_is_beneath_every_servers` | host | L.sched.169 |
 | `src/lib/kernel/sched/src/tests.rs::a_request_is_carried_and_a_change_waits_for_the_next` | host | L.sched.107 |
 | `src/lib/kernel/sched/src/tests.rs::a_shorter_request_is_picked_first` | host | L.sched.107 |
 | `src/lib/kernel/sched/src/tests.rs::a_slot_taken_apart_and_put_together_serves_a_queue` | host | L.sched.63 |
@@ -3880,6 +3909,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/check.rs::item_crates_allocate_fallibly` | gate | L.btrfs.22 |
 | `tools/common/xtask/src/check.rs::loader_rule` | gate | L.user.205, H.MEM.26 |
 | `tools/common/xtask/src/check.rs::loom` | gate | L.sched.51 |
+| `tools/common/xtask/src/check.rs::test_flags` | gate | L.sched.161 |
 | `tools/common/xtask/src/compositor/live.rs::seat_power` | gate | L.x86_64.213, H.BOOT.6 |
 | `tools/common/xtask/src/container.rs::run` | gate | L.object.314 |
 | `tools/common/xtask/src/container.rs::run` | gate | L.object.370 |
@@ -3900,6 +3930,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/ipc.rs::test_ipc_equiv` | gate | L.x86_64.159, L.x86_64.160, L.sched.59 |
 | `tools/common/xtask/src/ipc.rs::test_ipc_equiv` | gate | L.x86_64.161 |
 | `tools/common/xtask/src/jobs.rs::test_jobs` | gate | L.x86_64.115 |
+| `tools/common/xtask/src/kernel_shape.rs::test_kernel_shape` | gate | L.sched.168 |
 | `tools/common/xtask/src/machine_check.rs::bring_up_uses_only_checked_accesses` | gate | L.x86_64.232 |
 | `tools/common/xtask/src/machine_check.rs::smca_registers_only_in_their_two_functions` | gate | L.x86_64.239 |
 | `tools/common/xtask/src/machine_check.rs::test_amd` | gate | L.x86_64.233 |
@@ -4006,6 +4037,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/smbios.rs::problem` | gate | H.BOOT.16 |
 | `tools/common/xtask/src/threads.rs::test_threads` | gate | L.object.314 |
 | `tools/common/xtask/src/threads.rs::test_threads` | gate | L.sched.109 |
+| `tools/common/xtask/src/threads.rs::test_threads` | gate | L.sched.169 |
 | `tools/common/xtask/src/threads.rs::test_threads` | gate | L.sched.99, L.sched.100, L.sched.101 |
 | `tools/common/xtask/src/watchdog.rs::disabled` | gate | L.lockup.7 |
 | `tools/common/xtask/src/watchdog.rs::feeder_stops` | gate | H.FAIL.14, L.lockup.6, L.lockup.7 |

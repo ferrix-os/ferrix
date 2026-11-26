@@ -210,6 +210,11 @@ pub struct Job {
     /// (`docs/OPAQUE-KERNEL.md` §9.2): set only as it is made, by
     /// [`Job::new_child_domain`], and never changed.
     domain: u64,
+    /// `schedule=windows`: its partition, its parent's at its making; set by
+    /// [`Job::set_partition`] only while it has no process and no child, and never after
+    /// the frame is sealed (K9 §4, L.sched.162).
+    #[cfg(ferrix_schedule = "windows")]
+    partition: core::sync::atomic::AtomicU8,
     /// Sealed as it was made, as is every job made inside it (`H.OBJ.22`).
     sealed: bool,
     /// Its processes' executable memory comes only from sealed, measured VMOs
@@ -464,6 +469,8 @@ impl Job {
             charge: Charge::none(Resource::Objects),
             audit_budget,
             domain: 0,
+            #[cfg(ferrix_schedule = "windows")]
+            partition: core::sync::atomic::AtomicU8::new(0),
             sealed: false,
             measured: AtomicBool::new(false),
             granted_below: AtomicBool::new(false),
@@ -488,6 +495,10 @@ impl Job {
         let mut child = Job::bare(Some(Arc::clone(self)), name, Some(quota), budget)?;
         child.charge = charge;
         child.domain = domain;
+        #[cfg(ferrix_schedule = "windows")]
+        {
+            child.partition = core::sync::atomic::AtomicU8::new(self.partition());
+        }
         child.sealed = sealed || self.sealed;
         child.measured = AtomicBool::new(self.measured());
         child.level = self.level;
@@ -606,6 +617,42 @@ impl Job {
     /// The speculation domain it is: zero for none.
     pub fn domain(&self) -> u64 {
         self.domain
+    }
+
+    /// `schedule=windows`: its partition. Zero under every other schedule.
+    pub fn partition(&self) -> u8 {
+        #[cfg(ferrix_schedule = "windows")]
+        return self.partition.load(Ordering::Acquire);
+        #[cfg(not(ferrix_schedule = "windows"))]
+        0
+    }
+
+    /// `schedule=windows`: make it partition `partition`, which `sched::windows` checks is
+    /// below the frame's count. Refused for the root, for a job not a child of the root's,
+    /// and for one with a live process or a child (L.sched.162): so no task ever reads a byte
+    /// that changes, and no parent walk is needed.
+    #[cfg(ferrix_schedule = "windows")]
+    pub(crate) fn set_partition(self: &Arc<Self>, partition: u8) -> Result<(), JobError> {
+        let below_root = self
+            .parent
+            .as_ref()
+            .is_some_and(|parent| Arc::ptr_eq(parent, root()));
+        if !below_root {
+            return Err(JobError::Sealed);
+        }
+        let members = self.state.lock();
+        if members.live != 0
+            || !members.named.is_empty()
+            || members
+                .children
+                .iter()
+                .any(|child| child.strong_count() > 0)
+        {
+            return Err(JobError::Sealed);
+        }
+        self.partition.store(partition, Ordering::Release);
+        drop(members);
+        Ok(())
     }
 
     /// Its criticality level.
@@ -938,8 +985,16 @@ impl Job {
             .is_some()
     }
 
-    /// Set its `cpu.weight`. Whether it could be: the tree's root has none.
+    /// Set its `cpu.weight`. Whether it could be: the tree's root has none, and under
+    /// `schedule=windows` no job has one, since no task is on a fair class (L.sched.169): refused,
+    /// not accepted without effect.
     pub fn set_cpu_weight(&self, weight: u32) -> bool {
+        #[cfg(ferrix_schedule = "windows")]
+        {
+            let _ = weight;
+            return false;
+        }
+        #[cfg(not(ferrix_schedule = "windows"))]
         self.quota
             .as_ref()
             .map(|quota| quota.set_weight(weight))

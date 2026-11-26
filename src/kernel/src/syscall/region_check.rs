@@ -368,7 +368,9 @@ fn window_went(before: u64) -> bool {
             return false;
         }
         let _ = crate::sched::reap();
-        crate::sched::yield_now();
+        // The check's kernel thread is above every region process's level, so a yield
+        // loop would starve the threads whose end it waits for (stage 9 on AArch64).
+        crate::sched::give_way();
     }
     true
 }
@@ -471,7 +473,9 @@ fn fault_ends_the_region(side: &Side, root: Handle) -> Result<(), &'static str> 
             return Err("a region and its processes did not give back what they held");
         }
         let _ = crate::sched::reap();
-        crate::sched::yield_now();
+        // The check's kernel thread is above every region process's level, so a yield
+        // loop would starve the threads whose end it waits for (stage 9 on AArch64).
+        crate::sched::give_way();
     }
 }
 

@@ -170,7 +170,9 @@ METHODS = re.compile(
     r"|shrink_to_fit|shrink_to|sort|sort_by|sort_by_key|sort_by_cached_key"
     r"|concat|join|repeat|split_off|or_insert|or_insert_with|or_default"
     r"|to_ascii_lowercase|to_ascii_uppercase|to_lowercase|to_uppercase"
-    r"|into_owned|clone_from|partition|unzip)\s*(?:\(|::)"
+    # `partition` with no argument is not Iterator::partition, whose closure is required: it is
+    # a getter such as Job::partition, schedule=windows's (ledger 7648 WR.1).
+    r"|into_owned|clone_from|partition(?!\s*\(\s*\))|unzip)\s*(?:\(|::)"
 )
 PATTERNS = (CONSTRUCTORS, MACROS, METHODS)
 
@@ -442,6 +444,8 @@ fn a() {
     let c: Vec<_> = it.collect();
     let d = it.collect::<Vec<_>>();
     let e = alloc::vec![0; 4];
+    let (f, g): (Vec<_>, Vec<_>) = it.partition(|x| *x > 0);
+    let p = job.partition();
 }
 
 #[cfg(test)]
@@ -458,6 +462,7 @@ _SELF_EXPECT = [
     (12, "collect", None),
     (13, "collect", None),
     (14, "vec!", None),
+    (15, "partition", None),
 ]
 
 

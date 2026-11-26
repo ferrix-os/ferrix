@@ -23,9 +23,11 @@ path = "../src/kernel_core.rs"
 # class is open debt there (`unclassified_deps`, finding F-76).
 [dependencies]
 # The certified item's own crates (the record's item ring): the ELF reader,
-# SHA-256, the EDF scheduler's arithmetic.
+# SHA-256, the EDF scheduler's arithmetic, and the windows scheduler's class
+# (K9 §4, linked only under schedule=windows).
 ferrix-elf.workspace = true
 ferrix-sched-edf.workspace = true
+ferrix-sched-windows.workspace = true
 ferrix-sha256.workspace = true
 
 # Infrastructure the record allowlists for the item: fallible allocation, the

@@ -119,6 +119,7 @@ members = [
     "src/lib/kernel/qr",
     "src/lib/kernel/sched",
     "src/lib/kernel/sched-edf",
+    "src/lib/kernel/sched-windows",
     "src/lib/fs/common/vfs",
     "src/lib/proto/pkg",
 
@@ -333,6 +334,7 @@ ferrix-restart = { path = "src/lib/init/restart" }
 ferrix-pci = { path = "src/lib/platform/pci" }
 ferrix-sched = { path = "src/lib/kernel/sched" }
 ferrix-sched-edf = { path = "src/lib/kernel/sched-edf" }
+ferrix-sched-windows = { path = "src/lib/kernel/sched-windows" }
 ferrix-pkg = { path = "src/lib/proto/pkg" }
 
 # ---------------------------------------------------------------------------

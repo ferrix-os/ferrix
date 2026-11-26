@@ -1439,6 +1439,12 @@ fn drivers_job() -> Result<Arc<Job>, &'static str> {
         .or_else(|_| root.new_child_as(false, true))
         .or_else(|_| Job::new_root_as(true))
         .map_err(|_| "no memory for the drivers' job")?;
+    // Its partition before anything is in it (K9 §4). An existing named job keeps its own.
+    #[cfg(ferrix_schedule = "windows")]
+    if job.partition() != sched::windows::FIRST {
+        sched::windows::assign(&job, sched::windows::FIRST)
+            .map_err(|_| "the drivers' job took no partition")?;
+    }
     // K14 holds of drivers where the kernel's first processes are measured (BA.4).
     #[cfg(ferrix_personality = "user")]
     job.make_measured();

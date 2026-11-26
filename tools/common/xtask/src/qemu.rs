@@ -822,6 +822,11 @@ const USER_BOOT_LINES: &[(Option<(&str, &str)>, &str)] = &[
         Some(("schedule", "edf")),
         "  edf      a budget's rules held",
     ),
+    (
+        Some(("schedule", "windows")),
+        "  windows  two partitions' windows of 2 and 3 ms",
+    ),
+    (Some(("schedule", "windows")), "  windows  sealed: 10 ms"),
     (None, "  generic  "),
     (None, "  devices  "),
     (None, "  reserved "),
@@ -866,6 +871,27 @@ fn regions_problem(lines: &[String], value: Option<&str>) -> Option<String> {
     })
 }
 
+/// The seal's line under `schedule=windows`, and the boot authority's lines that a first
+/// process has been started or asked for: the manager's, devmgr's, linuxd's.
+const SEAL_LINE: &str = "  windows  sealed: ";
+const FIRST_PROCESS_LINES: [&str; 3] = ["  partmgr  ", "  devmgr   ", "  linuxd   "];
+
+/// L.sched.161 by order, not presence (ledger 7562 WZ.12): the seal's line comes before the first
+/// line of any first process. A boot with no seal line is left to [`USER_BOOT_LINES`].
+fn seal_order_problem(lines: &[String]) -> Option<String> {
+    let seal = lines.iter().position(|line| line.contains(SEAL_LINE))?;
+    let (first, line) = lines
+        .iter()
+        .enumerate()
+        .find(|(_, line)| FIRST_PROCESS_LINES.iter().any(|text| line.contains(text)))?;
+    (first < seal).then(|| {
+        format!(
+            "under schedule=windows a first process's line came before the seal's: `{}`",
+            line.trim()
+        )
+    })
+}
+
 /// The first of [`USER_BOOT_LINES`] a boot lacks, or the reference's marker it printed.
 fn user_boot_problem(lines: &[String], flags: Option<&crate::flags::Resolved>) -> Option<String> {
     if lines.iter().any(|line| line.contains(SUCCESS_MARKER)) {
@@ -880,6 +906,11 @@ fn user_boot_problem(lines: &[String], flags: Option<&crate::flags::Resolved>) -
             || matches!(flags.level.as_str(), "sc2" | "sc4")
     });
     if let Some(problem) = k14_problem(lines, held) {
+        return Some(problem);
+    }
+    if flags.is_some_and(|flags| flags.value("schedule") == Some("windows"))
+        && let Some(problem) = seal_order_problem(lines)
+    {
         return Some(problem);
     }
     USER_BOOT_LINES.iter().find_map(|(flag, text)| {

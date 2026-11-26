@@ -65,6 +65,12 @@ mod task;
 pub mod trip;
 pub mod vtime;
 mod wait;
+/// `schedule=windows`'s frame (K9 §4, ledger 7460).
+#[cfg(ferrix_schedule = "windows")]
+pub mod windows;
+/// Its boot check.
+#[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+pub mod windows_check;
 pub mod work;
 
 use alloc::sync::Arc;
@@ -1971,6 +1977,18 @@ pub fn yield_now() {
     schedule();
 }
 
+// CHECKS-ONLY: syscall/region_check.rs; home: in crate
+/// Let what a spin-wait waits for run (K9 §4.1, ledger 7562 WZ.5). Under `schedule=windows` a
+/// yield passes only to equals: a waiter above what it waits for, on the same processor and in
+/// the same partition, would starve it for good, so it sleeps a millisecond instead. Elsewhere,
+/// a yield, as before.
+pub fn give_way() {
+    #[cfg(ferrix_schedule = "windows")]
+    sleep_for(1_000_000);
+    #[cfg(not(ferrix_schedule = "windows"))]
+    yield_now();
+}
+
 /// Block the running task until `deadline`, by the counter's reckoning.
 pub fn sleep_until(deadline: u64) {
     let Some(task) = current() else {
@@ -2280,6 +2298,8 @@ fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
             // home made on its own processor is (`kick_after_wake`,
             // undeferred).
             let decide = kick_after_wake(here_queue, here, false).is_some();
+            #[cfg(ferrix_schedule = "windows")]
+            let decide = windows::pull_decides(decide, here_queue, task);
             count_pulled(here);
             drop(first_queue);
             drop(second_queue);
@@ -2599,6 +2619,13 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
             queue.insert(task);
         }
         kick_cpu = kick_after_wake(&mut queue, cpu, defer && here == Some(cpu));
+        // Through the window at the wake's own instant (K9 §4, L.sched.164; ledger 7639 WT.1):
+        // the class's latest time is the last pick's or tick's, which on a halted processor can
+        // lie in an earlier frame's window.
+        #[cfg(ferrix_schedule = "windows")]
+        {
+            kick_cpu = windows::filter_kick(&queue, task, kick_cpu);
+        }
         break;
     }
     // As `spawn_task`: a wake-up onto this processor arms this processor's
@@ -2875,6 +2902,11 @@ pub(crate) fn service_refusal(cpu: usize) -> Result<(), ServiceRefusal> {
 pub(crate) fn put_back_in_service(cpu: usize, deadline: u64) -> Result<(), ServiceRefusal> {
     if in_service(cpu) {
         return Ok(());
+    }
+    // A processor with no row of the sealed frame has no window to run in (L.sched.170).
+    #[cfg(ferrix_schedule = "windows")]
+    if !windows::may_return(cpu) {
+        return Err(ServiceRefusal::NotThere);
     }
     if !park_transition(cpu, PARKED, RETURNING) {
         return Err(ServiceRefusal::NotThere);
@@ -3163,6 +3195,13 @@ fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
             continue;
         };
         if !queue.is_running_idle() || queue.waiting() != 0 {
+            continue;
+        }
+        // WT.4 (ledger 7639): a wake placed elsewhere goes only to a processor whose window
+        // admits the task's partition at the wake's instant, so the kick that follows is a kick
+        // into an open window, as at home (L.sched.164, 166).
+        #[cfg(ferrix_schedule = "windows")]
+        if !windows::admits(&queue, task) {
             continue;
         }
         move_onto(task, None, to, &mut queue);

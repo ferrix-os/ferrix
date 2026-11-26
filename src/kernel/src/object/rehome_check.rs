@@ -117,8 +117,18 @@ fn check_limits_and_usage() -> Result<(), &'static str> {
 /// `set_cpu_weight` makes the job's weight the value written.
 ///
 /// Verifies: L.object.61
+///
+/// Under `schedule=windows`, the `cpu.weight` refusal (ledger 7562 WZ.13).
+///
+/// Verifies: L.sched.169
 fn check_the_weight() -> Result<(), &'static str> {
     let (_root, job) = fresh()?;
+    // Under windows a weight is refused by name (L.sched.169): the case is the refusal.
+    #[cfg(ferrix_schedule = "windows")]
+    if job.set_cpu_weight(300) {
+        return Err("a job's weight was accepted under windows");
+    }
+    #[cfg(not(ferrix_schedule = "windows"))]
     if !job.set_cpu_weight(300) || job.cpu_weight() != 300 {
         return Err("a job's weight is not the value written");
     }

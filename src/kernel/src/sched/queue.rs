@@ -286,11 +286,14 @@ const fn before(a: u64, b: u64) -> bool {
 
 /// What a processor's queue holds, the one seam between the schedules (ledger 7088): the
 /// fair class alone, which is `present`'s and `desktop`'s, or reservations above it.
-#[cfg(not(ferrix_schedule = "edf"))]
+#[cfg(not(any(ferrix_schedule = "edf", ferrix_schedule = "windows")))]
 pub(crate) type Tier<T> = ferrix_sched::RunQueue<T>;
 /// See above.
 #[cfg(ferrix_schedule = "edf")]
 pub(crate) type Tier<T> = ferrix_sched_edf::OverFair<T>;
+/// See above: `max`'s windows with fixed priorities inside and no fair class (K9 §4, C3).
+#[cfg(ferrix_schedule = "windows")]
+pub(crate) type Tier<T> = ferrix_sched_windows::Windows<T>;
 
 /// One CPU's queue.
 #[derive(Debug)]
@@ -455,7 +458,7 @@ impl CpuQueue {
         user: bool,
         extra: Option<(u32, i64)>,
     ) -> Option<(u32, u32)> {
-        #[cfg(ferrix_schedule = "edf")]
+        #[cfg(any(ferrix_schedule = "edf", ferrix_schedule = "windows"))]
         self.fair.note_time(now);
         self.account_load(now);
         let delta = now.saturating_sub(self.exec_start);
@@ -852,16 +855,32 @@ impl CpuQueue {
 
     /// What should run now: the fair class's choice, or the idle task.
     pub(crate) fn pick_next(&mut self) -> Option<Arc<Task>> {
-        #[cfg(ferrix_schedule = "edf")]
+        #[cfg(any(ferrix_schedule = "edf", ferrix_schedule = "windows"))]
         self.fair.note_time(crate::timer::now_nanos());
+        #[cfg(not(all(ferrix_schedule = "windows", ferrix_checks = "on")))]
         if let Some(task) = self.fair.pick_next() {
             return Some(Arc::clone(task));
+        }
+        // Checks only: the check's judge of the samples reads each window's end and the pick
+        // that ended it, on its held processor (ledger 7549 WY.7-WY.10).
+        #[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+        {
+            let picked = self.fair.pick_next().map(Arc::clone);
+            super::windows_check::note_pick(&self.fair);
+            if picked.is_some() {
+                return picked;
+            }
         }
         self.idle.clone()
     }
 
     /// Whether this CPU has anything to run besides its idle task.
     pub(crate) fn has_work(&self) -> bool {
+        // Under windows, what the window may run, not every partition's (WN.4), at the instant
+        // asked (WT.1): the idle loop's look comes between picks.
+        #[cfg(ferrix_schedule = "windows")]
+        return self.fair.current().is_some() || self.fair.runnable_at(crate::timer::now_nanos());
+        #[cfg(not(ferrix_schedule = "windows"))]
         !self.fair.is_empty()
     }
 
@@ -934,10 +953,14 @@ impl CpuQueue {
         // nothing, and this is where tickless comes from. With something
         // waiting, a decision at least once a slice, however long a request
         // the running task holds: see `RunQueue::decision_in_ns`.
+        #[cfg(not(ferrix_schedule = "windows"))]
         let slice = self
             .fair
             .decision_in_ns()
             .map(|left| now.saturating_add(left));
+        // Absolute: the class's time may be older than `now` (K9 §4).
+        #[cfg(ferrix_schedule = "windows")]
+        let slice = self.fair.decision_at();
 
         // A task under a `cpu.max` is cut when its quota is used up, however
         // alone it is: nothing else would interrupt it to throttle it. The
@@ -951,9 +974,23 @@ impl CpuQueue {
             .and_then(|task| crate::object::quota::runtime_left(task.group(), now))
             .map(|left| now.saturating_add(left.min(BANDWIDTH_SLICE_NS)));
 
-        match [sleeper, slice, bandwidth].into_iter().flatten().min() {
+        let first = [sleeper, slice, bandwidth].into_iter().flatten().min();
+        // Checks only: the check judges what the class asks for at every arm on its held
+        // processor, and what reaches the timer (ledger 7549 WY.1, WY.4-WY.6).
+        #[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+        let judged = super::windows_check::judge_ask(
+            &self.fair,
+            slice,
+            first.map(|at| now.saturating_add(at.saturating_sub(now).max(MIN_ARM_NS))),
+            now,
+        );
+        match first {
             Some(at) => crate::timer::after_from(at.saturating_sub(now).max(MIN_ARM_NS), now),
             None => crate::timer::stop(),
+        }
+        #[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+        if judged {
+            super::windows_check::judge_requested(slice, now);
         }
     }
 
@@ -966,9 +1003,17 @@ impl CpuQueue {
         // different -- a task with exactly one home should not be moved even
         // *to* that home, since it is already there; one queued elsewhere is
         // the pick push's (L.sched.98).
-        self.fair.latest_where(|task| {
+        let movable = |task: &Arc<Task>| {
             !super::pinned(task) && super::allowed(task, to) && task.state() == RUNNABLE
-        })
+        };
+        // Under windows at the instant asked (WT.1): steal, balance and push decide outside this
+        // queue's picks.
+        #[cfg(ferrix_schedule = "windows")]
+        return self
+            .fair
+            .latest_where_at(crate::timer::now_nanos(), movable);
+        #[cfg(not(ferrix_schedule = "windows"))]
+        self.fair.latest_where(movable)
     }
 
     /// Take a queued task off this queue, for another one to run.
@@ -1007,6 +1052,10 @@ impl CpuQueue {
 
     /// Whether the running task should give way to something queued.
     pub(crate) fn should_preempt(&self) -> bool {
+        // Under windows at the instant asked (WT.1): a wake decides between picks.
+        #[cfg(ferrix_schedule = "windows")]
+        return self.fair.should_preempt_at(crate::timer::now_nanos());
+        #[cfg(not(ferrix_schedule = "windows"))]
         self.fair.should_preempt()
     }
 

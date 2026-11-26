@@ -131,7 +131,7 @@ values.heap = { allows = ["present", "sc2", "none"], lands = "today", built = "y
 
 [flags.schedule]
 why = "K9's static windows with fixed priorities inside them and no fair class (C3, C6), partitioned EDF with a hard CBS above the fair class (ferrix-sched-edf), or today's fair scheduler"
-values.windows = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "no" }
+values.windows = { allows = ["sc4", "present", "sc2", "none"], lands = "M3", built = "adhoc", requires = ["personality=user"] }
 values.edf = { allows = ["present", "sc2", "none"], lands = "M3", built = "yes", built_on = ["x86_64", "aarch64"], requires = ["personality=user"] }
 values.fair = { allows = ["present", "none"], lands = "today", built = "yes" }
 

@@ -528,6 +528,15 @@
         "below": "ferrix-sched's run queue, its fair class beneath the reservations.",
         "above": "sched/queue.rs's Tier and sched/reserve.rs: partitioned EDF, a hard CBS and per-processor admission, ledger 7011 S.4, 7088. No kernel but schedule=edf's links it."
       },
+      "ferrix-sched-windows": {
+        "ring": "core",
+        "path": "src/lib/kernel/sched-windows",
+        "in_ring0_when": [
+          "schedule=windows"
+        ],
+        "below": "ferrix-sched's ordered set (Ordered over its tree, Slot, Node), EntityState and the constants it names: no RunQueue (C3).",
+        "above": "sched/queue.rs's Tier and sched/windows.rs: a static frame of windows per processor, fixed priorities and a round robin inside each, no fair class; docs/microkernel/K9.md section 4, ledger 7011 S.1-S.3, 7088 W.1-W.4, 7460. A dependency of every kernel (kernel_core.rs names it, as it names ferrix-sched-edf); its code reaches ring 0 only under schedule=windows, which nm shows (ledger 7591 WV.1)."
+      },
       "ferrix-slots": {
         "ring": "item",
         "path": "src/lib/proto/slots",
@@ -585,7 +594,7 @@
         "(docs/certification/ITEM.md section 2)."
       ],
       "ferrix-fallible": "Fallible Box/Vec/VecDeque/String construction on stable Rust (F-23). The core's own allocation toolkit, src/kernel/src/fallible.rs, is built on it, so an item crate converting to fallible allocation uses the same code the core does rather than a second copy. It also dispatches an item crate's map inserts to the reserved section the kernel installs at boot (set_section, in_section; src/kernel/src/fallible.rs library_section, L.mm.63): ferrix-btrfs-write's every BTreeMap and BTreeSet insert relies on that dispatch to be fallible.",
-      "ferrix-sched": "The fair class and the sleepers' timeline, as the kernel's core has always named them; ferrix-sched-edf's beneath it (ledger 7088 G.3).",
+      "ferrix-sched": "The fair class and the sleepers' timeline, as the kernel's core has always named them; ferrix-sched-edf's beneath it (ledger 7088 G.3). Under schedule=windows no task is on its fair class, and what stays linked is C3's residue: Timeline and Entity, the tree as Ordered, Node, Slot, EntityState, CpuSet, the NICE constants, wake_wide (docs/microkernel/K9.md section 4, ledger 7460 WN.6).",
       "ferrix-sync": "The spin and sleep locks src/kernel/src/sync.rs wraps for the whole core, and ferrix-fallible's one dependency (its injector's `Once`)."
     }
   },

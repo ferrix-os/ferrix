@@ -94,6 +94,9 @@ fn test_kernel_symbols(args: &Args) -> Result<()> {
     Ok(())
 }
 
+/// `test-kernel-shape`: under `schedule=windows`, the fair class's symbols absent too.
+///
+/// Verifies: L.sched.168
 fn test_kernel_shape(args: &Args) -> Result<()> {
     if crate::flags::this_run()?.value("personality") != Some("user") {
         return Err(Error::new("test-kernel-shape is for --personality user"));
@@ -106,9 +109,20 @@ fn test_kernel_shape(args: &Args) -> Result<()> {
             .ok_or_else(|| Error::new("the kernel has no directory"))?
             .display()
             .to_string();
+        // The schedule flag decides what else is absent (C3, L.sched.168).
+        let run = crate::flags::this_run()?;
+        let schedule = run.value("schedule").unwrap_or("fair").to_owned();
+        let checks = run.value("checks").unwrap_or("on").to_owned();
         python_with(
             "tools/common/check/check-kernel-shape.py",
-            &[directory.as_str(), "--report"],
+            &[
+                directory.as_str(),
+                "--report",
+                "--schedule",
+                schedule.as_str(),
+                "--checks",
+                checks.as_str(),
+            ],
         )?;
         python_with(
             "tools/common/check/check-kernel-alloc-audit.py",

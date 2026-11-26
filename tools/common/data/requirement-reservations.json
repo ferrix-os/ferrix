@@ -43,17 +43,6 @@
     },
     {
       "ids": [
-        "H.SCHED.26-27",
-        "L.sched.153-170",
-        "L.sched.201"
-      ],
-      "owner": "mk-max",
-      "branch": "feature/mk-max",
-      "date": "2026-11-04",
-      "purpose": "K17's one high-level requirement, past the block allotted (consultant 6222 refused folding K11's to free one); K9's charge and windows, whose ids are the scheduler's and not L.user or L.trap (consultant 6208 (10)). Passed from mk-flip to mk-max for windows (ledger 7460 WN.13); L.sched.201, windows' timer asked for each window's end (ledger 7549 WY.4; 171 was taken)."
-    },
-    {
-      "ids": [
         "H.OBJ.29",
         "L.object.308",
         "L.user.213-219"
@@ -125,7 +114,7 @@
       "owner": "mk-flip",
       "branch": "feature/mk-flip",
       "date": "2026-11-05",
-      "purpose": "schedule=windows, ledger 7011 S.1-S.8; native 0x10E2-0x10E4 and panic FX-0971 with it. K9's H.SCHED.26-27 and L.sched.153-170 pass from the finished mk-restricted to mk-flip for windows, with FX-0927. Its EDF part, H.SCHED.29-30 and L.sched.184-193, was split off to sched-classes on 2026-11-07 (below)."
+      "purpose": "schedule=windows, ledger 7011 S.1-S.8; native 0x10E2-0x10E4 and panic FX-0971 with it. K9's H.SCHED.26-27 and L.sched.153-170 passed from the finished mk-restricted to mk-flip for windows, then to mk-max (ledger 7460 WN.13), where they are written, with FX-0927. Its EDF part, H.SCHED.29-30 and L.sched.184-193, was split off to sched-classes on 2026-11-07 (below)."
     },
     {
       "ids": ["H.SCHED.29-30", "L.sched.184-193"],

@@ -172,6 +172,15 @@ pub fn writes_here() -> u64 {
         .map_or(0, |writes| writes.load(Ordering::Relaxed))
 }
 
+/// The deadline this processor's one-shot was last asked for ([`REQUESTED`]), zero with none:
+/// read by `schedule=windows`'s boot check alone (ledger 7549 WY.1, WY.9).
+#[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+pub(crate) fn requested_here() -> u64 {
+    crate::smp::this_cpu()
+        .and_then(|cpu| REQUESTED.get(cpu.logical))
+        .map_or(0, |requested| requested.load(Ordering::Relaxed))
+}
+
 /// This processor's slot in [`ARMED`], once processors have records.
 fn armed_slot() -> Option<&'static AtomicU64> {
     crate::smp::this_cpu().and_then(|cpu| ARMED.get(cpu.logical))

@@ -74,6 +74,25 @@ LEFT_CRATES = ("ferrix_kernel_load", "ferrix_kernel_raised_checks",
 # K1's fast path has the mark up (ledger 6464 Z2, 6981).
 ABSENT_SYMBOLS = ("x86_64::syscall::arch_prctl",)
 
+# Under `schedule=windows` no task is on a fair run queue, and the fair class's pick, weights and
+# fold are not in the kernel (C3, L.sched.168, ledger 7460 WN.9, 7540 WX.9): symbols holding
+# these. `Task::effective_weight` stays linked, unshared: under the flag `quota::effective_with`
+# returns the base weight it is given, and the share's arithmetic is `carried_weight`, refused
+# here. The windows class's own `avg_vruntime` is its stub, named by its full path below.
+WINDOWS_ABSENT = (
+    "ferrix_sched::RunQueue",
+    "carried_weight",
+    "plan_job_fold",
+    "follow_group_share",
+)
+WINDOWS_STUB = (
+    "<ferrix_sched_windows::Windows<alloc::sync::Arc<ferrix_kernel_core::sched::task::Task>>>"
+    "::avg_vruntime"
+)
+# The windows check's hooks in the arm and the pick (ledger 7549 WY.6) are checks-only: with
+# `checks=off` no symbol of the check's module is in the kernel.
+WINDOWS_CHECKS_ONLY = "sched::windows_check::"
+
 # (a symbol's text, the file it proves is not built).
 REAL_SYMBOLS = (
     ("console::screen::Board::newline", "console/screen.rs"),
@@ -561,6 +580,8 @@ def main() -> int:
     parser.add_argument("--budget", metavar="SET", help="hold this build to ring0-budget.json's baseline for SET")
     parser.add_argument("--arch", help="with --budget: the build's architecture")
     parser.add_argument("--sets", action="store_true", help="print ring0-budget.json's builds, one a line")
+    parser.add_argument("--schedule", default=None, help="the build's schedule flag")
+    parser.add_argument("--checks", default=None, help="the build's checks flag")
     args = parser.parse_args()
     tree = os.path.abspath(args.tree)
     if args.sets:
@@ -604,6 +625,16 @@ def main() -> int:
         for symbol in ABSENT_SYMBOLS:
             if symbol in plain:
                 breaches.append(f"{symbol}: a user kernel holds no such writer, and it is in the kernel")
+        if args.schedule == "windows":
+            for symbol in WINDOWS_ABSENT:
+                if symbol in plain:
+                    breaches.append(f"{symbol}: under schedule=windows the fair class's, and it is in the kernel")
+            for line in names.splitlines():
+                if "avg_vruntime" in line and not line.endswith(" " + WINDOWS_STUB):
+                    breaches.append(f"{line.split()[-1]}: under schedule=windows the fair class's, and it is in the kernel")
+                    break
+            if args.checks == "off" and WINDOWS_CHECKS_ONLY in plain:
+                breaches.append(f"{WINDOWS_CHECKS_ONLY}: checks-only, and it is in a checks=off kernel")
     else:
         breaches.append(f"{kernel}: no kernel to read symbols from")
     if args.report:

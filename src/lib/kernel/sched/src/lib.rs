@@ -91,7 +91,7 @@ pub use balance::{
 pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, WORDS, check_partition};
 pub use timeline::Timeline;
 use tree::{Key, Tree, before};
-pub use tree::{Node, Slot};
+pub use tree::{Node, Ordered, Slot};
 
 /// The weight of a task at nice 0, and the unit every other weight is
 /// measured in: an entity of this weight advances its virtual runtime at

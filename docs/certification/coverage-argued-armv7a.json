@@ -43,21 +43,21 @@
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "194",
+      "lines": "203",
       "category": "defensive",
       "match": "Err(_) => cpu::flush_tlb(),",
       "why": "A page address past 4 GiB asked to be invalidated, which on this architecture cannot be a translation; everything is flushed rather than a truncated page. Every caller passes a virtual address, all of which are below 4 GiB here."
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1382",
+      "lines": "1391",
       "category": "defensive",
       "match": "shutdown()",
       "why": "Firmware whose PSCI `SYSTEM_RESET` returned instead of resetting: the machine is powered off rather than carrying on as though it had reset. The suite's `boot-reset` gate takes the reset, and QEMU and the DK1 both reset."
     },
     {
       "file": "arch/armv7a/mod.rs",
-      "lines": "1412",
+      "lines": "1421",
       "category": "defensive",
       "match": "return Err(\"this GIC is not a GICv2, and GICv3 support is not written yet\");",
       "why": "A device tree describing a GICv3 on ARMv7-A, which this kernel has no driver for here: interrupt bring-up is refused by name and the kernel stops (FX-0303). The machines it runs on -- QEMU's `virt` as the suite boots it, the STM32MP157 -- have a GICv2; a `virt` given a GICv3 would be a boot that stops, which is not coverage evidence."
@@ -519,7 +519,7 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1598",
+      "lines": "1604",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."
@@ -1212,49 +1212,49 @@
     },
     {
       "file": "main.rs",
-      "lines": "1700",
+      "lines": "1708",
       "category": "failure-path",
       "match": "if let Some(missing) = missing {",
       "why": "The failure arm in `register_load`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `LOAD_REGISTRATION` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1835",
+      "lines": "1843",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1842",
+      "lines": "1850",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1867",
+      "lines": "1875",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `bring_up_memory`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `MEMORY_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
-      "lines": "1998",
+      "lines": "2006",
       "category": "absent-hardware",
       "match": "if info.framebuffer.is_reclaimable() {",
       "why": "The framebuffer's report: ARMv7-A's virt has none."
     },
     {
       "file": "main.rs",
-      "lines": "2125",
+      "lines": "2133",
       "category": "absent-hardware",
       "match": "kaslr.source_text()",
       "why": "The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there."
     },
     {
       "file": "main.rs",
-      "lines": "2133-2134",
+      "lines": "2141-2142",
       "category": "absent-hardware",
       "match": "let pixels = u64::from(framebuffer.stride).saturating_mul(u6",
       "why": "The size of the loader's framebuffer: ARMv7-A's virt has none."
@@ -1394,154 +1394,154 @@
     },
     {
       "file": "object/process.rs",
-      "lines": "1111",
+      "lines": "1112",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of a debug assertion that interrupts are enabled when a process's watchers are reached: their lock is a plain one, which an interrupt handler may not take. Every caller is a system call or a task's exit, with interrupts on; reaching the row is the assertion firing."
     },
     {
       "file": "object/process.rs",
-      "lines": "1136",
+      "lines": "1137",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "As `Exit::observe`'s: the failure half of the assertion that interrupts are on when a process's watchers are closed."
     },
     {
       "file": "object/process.rs",
-      "lines": "1284",
+      "lines": "1285",
       "category": "defensive",
       "match": "debug_assert!(",
       "why": "The failure half of the assertion that an unstarted process's last handle is dropped with interrupts on, since the kill it causes may block. Handles close from system calls and exits, with interrupts on; the object check closes unstarted children's handles and reaches the kill."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1167",
+      "lines": "1173",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of new_idle_task is the error path's: no memory for a processor's idle task, made once per processor at bring-up with the heap all but empty. The stack is freed and the bring-up fails."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1610",
+      "lines": "1616",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a prepared task dropped with interrupts masked, which would free its stack waiting on every processor with interrupts off. The condition is evaluated under line 1105's and 1113's rows, which are reached (an unstarted child's drop at stage 9)."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "1892",
+      "lines": "1898",
       "category": "defensive",
       "match": "arch::wait_for_interrupt();",
       "why": "After the switch away from a dead task, which never returns to it: a dead task is never picked again (stage 5's a_dead_task_is_not_filed_as_a_sleeper, and check_invariants' DEAD_STILL_QUEUED, hold that). If it ever were picked, halting here is the only answer that corrupts nothing."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "3617-3619",
+      "lines": "3656-3658",
       "category": "failure-path",
       "match": "preempt_count(cpu),",
       "why": "FX-0503: a task blocked or yielded while holding a lock that disables preemption, which the preemption count cannot survive. The report names the lock's site and stops the machine; a kernel that never blocks under a spin lock never takes it."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4719-4720",
+      "lines": "4758-4759",
       "category": "failure-path",
       "match": "pub(crate) fn report_queues() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4724",
+      "lines": "4763",
       "category": "failure-path",
       "match": "for (cpu, lock) in queues.iter().enumerate() {",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4729-4730",
+      "lines": "4768-4769",
       "category": "failure-path",
       "match": "queue.len(),",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4733-4734",
+      "lines": "4772-4773",
       "category": "failure-path",
       "match": ".and_then(|flags| flags.get(cpu))",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4738",
+      "lines": "4777",
       "category": "failure-path",
       "match": "}",
       "why": "What each run queue holds, printed for a stage 5 check that has failed so the report says where the tasks were. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4741-4742",
+      "lines": "4780-4781",
       "category": "failure-path",
       "match": "pub(crate) fn print_picks(cpu: usize) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4747",
+      "lines": "4786",
       "category": "failure-path",
       "match": "let Ok(mut picks) = fallible::try_with_capacity::<queue::Pic",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4751",
+      "lines": "4790",
       "category": "failure-path",
       "match": "for pick in lock.lock().picks() {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4758",
+      "lines": "4797",
       "category": "failure-path",
       "match": "pick.at / 1000,",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4763",
+      "lines": "4802",
       "category": "failure-path",
       "match": "for seen in pick.seen.iter().take(pick.count) {",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/mod.rs",
-      "lines": "4773",
+      "lines": "4812",
       "category": "failure-path",
       "match": "}",
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "413",
+      "lines": "416",
       "category": "defensive",
       "match": "self.stats.wrong_picks += 1;",
       "why": "A pick the queue's tree made that a brute-force scan of the same queue disagrees with: EEVDF choosing other than the eligible task with the earliest deadline. Counted for the stage 5 fairness check, which requires zero; a correct tree never takes it."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "425-426",
+      "lines": "428-429",
       "category": "failure-path",
       "match": "let (newer, older) = self.trace.split_at(self.trace_next);",
       "why": "The remembered picks, read only by print_picks, which only a failed fairness check calls."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "523",
+      "lines": "526",
       "category": "defensive",
       "match": "return (self.stats.busy_ns, self.stats.idle_ns);",
       "why": "The times of a queue whose processor has not joined the scheduler: only between sched::init and a secondary's arrival, before any program can read /proc/stat, or on a machine where a processor failed to start, which stage 4 refuses."
     },
     {
       "file": "sched/queue.rs",
-      "lines": "731",
+      "lines": "734",
       "category": "defensive",
       "match": "task.return_run_slot(refused.slot);",
       "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."

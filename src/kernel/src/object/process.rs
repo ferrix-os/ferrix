@@ -670,6 +670,7 @@ impl Process {
             // (`L.object.248`); `process_create` places one not yet started.
             if Job::seal_refuses(&membership, to, checked)
                 || Job::measure_refuses(&membership, to, checked)
+                || (!checked && membership.partition() != to.partition())
             {
                 return Err(JobError::Sealed);
             }

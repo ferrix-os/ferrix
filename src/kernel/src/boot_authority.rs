@@ -43,6 +43,17 @@ pub fn set_region_check(check: fn()) {
     let _ = REGION_CHECK.call_once(|| check);
 }
 
+/// The boot's check of a sealed frame's refusals (`schedule=windows`, K9 §4), which `main.rs`
+/// hands in: product code names no check.
+#[cfg(ferrix_schedule = "windows")]
+static FRAME_CHECK: ferrix_sync::Once<fn()> = ferrix_sync::Once::new();
+
+/// Hand in [`FRAME_CHECK`].
+#[cfg(ferrix_schedule = "windows")]
+pub fn set_frame_check(check: fn()) {
+    let _ = FRAME_CHECK.call_once(|| check);
+}
+
 /// Start the first processes, in `MICROKERNEL.md` §5's order, `linuxd` last:
 /// its first program is init, which expects its devices' drivers to be there.
 pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
@@ -55,6 +66,19 @@ pub fn run(view: &ferrix_bootinfo::BootView<'_>) {
     flag_nodes();
     // Before K16's seal and before any process but its own: what it reads is the kernel's.
     if let Some(check) = REGION_CHECK.get() {
+        check();
+    }
+    // Before any first process: the kernel's frame, or none of them (K9 §4, L.sched.161).
+    #[cfg(ferrix_schedule = "windows")]
+    if let Err(why) = crate::sched::windows::seal_default() {
+        crate::panic::fatal!(
+            catalog::FRAME_UNSEALED,
+            "the frame did not seal: {}",
+            why.says()
+        );
+    }
+    #[cfg(ferrix_schedule = "windows")]
+    if let Some(check) = FRAME_CHECK.get() {
         check();
     }
     let served = start_manager();
@@ -464,6 +488,9 @@ fn try_start_manager() -> Result<Option<Served>, &'static str> {
     let job = job::root()
         .new_child_as(false, true)
         .map_err(|_| "no job for the partitions")?;
+    #[cfg(ferrix_schedule = "windows")]
+    crate::sched::windows::assign(&job, crate::sched::windows::FIRST)
+        .map_err(|_| "the partitions' job took no partition")?;
     job.make_measured();
     must_be_measured(&job);
     #[cfg(ferrix_kernel_memory = "retyped")]

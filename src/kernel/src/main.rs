@@ -1381,8 +1381,16 @@ fn start_scheduler(cpus: &'static smp::Topology) {
         report.spent_ms[7],
         report.spent_ms[8],
     );
+    // Under windows no task is on a fair class (L.sched.168): its stage-5 line says what holds.
+    // Two literal lines, so that every other schedule's kernel is the one it was (S.8).
+    #[cfg(not(ferrix_schedule = "windows"))]
     println!(
         "  stage 5  {} threads scheduled fairly across {} processors",
+        report.threads, report.processors,
+    );
+    #[cfg(ferrix_schedule = "windows")]
+    println!(
+        "  stage 5  {} threads scheduled by level within their partitions across {} processors",
         report.threads, report.processors,
     );
     checks_under_the_scheduler(cpus);
@@ -2271,6 +2279,14 @@ fn check_user_shape() {
         Ok(()) => println!("  edf      a budget's rules held, an unschedulable set refused"),
         Err(why) => fatal!(catalog::SCHEDULE_EDF, "edf self-check failed: {why}"),
     }
+    #[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+    match sched::windows_check::run() {
+        Ok(line) => println!("  windows  {line}"),
+        Err(why) => fatal!(
+            catalog::SCHEDULE_WINDOWS,
+            "windows self-check failed: {why}"
+        ),
+    }
 }
 
 /// The kernel's first processes, handing in the seal's check: product code names no check.
@@ -2283,5 +2299,15 @@ fn first_processes(view: &BootView<'_>) {
     boot_authority::set_region_check(syscall::region_check::check);
     // K14 at no memory: before the first processes, so before any driver asks for a domain.
     iommu::check::require_attach_refused(device::devices());
+    #[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+    boot_authority::set_frame_check(|| match sched::windows_check::after_seal() {
+        Ok(()) => println!(
+            "  windows  sealed: 10 ms, partition 0 for 1 ms and 1 for 9 on each processor; every refusal after the seal held"
+        ),
+        Err(why) => fatal!(
+            catalog::SCHEDULE_WINDOWS,
+            "windows self-check failed: {why}"
+        ),
+    });
     boot_authority::run(view);
 }

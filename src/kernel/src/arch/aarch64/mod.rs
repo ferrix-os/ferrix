@@ -215,6 +215,13 @@ pub(crate) fn publish_tables(address: u64) {
     flush_tlb_page(address);
 }
 
+/// Whether `schedule=windows`' boot check judges a window's overrun and a late stamp by this
+/// architecture's timer (K9 §4, WX.4): no, every AArch64 gate is TCG, whose window-end interrupt
+/// arrives up to tens of milliseconds late at gate load; BACKLOG owes the judged form on an honest
+/// Arm timer (WY.11).
+#[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+pub(crate) const WINDOW_TIMER_HONEST: bool = false;
+
 /// Invalidate the translation of the page holding `address` — on every core,
 /// as [`flush_tlb`] does.
 pub(crate) fn flush_tlb_page(address: u64) {

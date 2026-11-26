@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3125 declarations in the core's files, 217 in the item's; 279 checks-only.
+3138 declarations in the core's files, 218 in the item's; 280 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2450,6 +2450,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::observe` | method | item, load |  |
 | `Job::oom_counts` | method | item, load |  |
 | `Job::parent` | method | item, load |  |
+| `Job::partition` | method | item, load |  |
 | `Job::path_names` | method | load |  |
 | `Job::quota_index` | method | item, load |  |
 | `Job::remove_named_child` | method | load |  |
@@ -2854,6 +2855,7 @@ checks above is `pub` for raised checks (F3).
 | `DEVMGR_BY_INIT` | static | item |  |
 | `FAST_PATH_CONTINUATION_MASKED` | static | item |  |
 | `FIRST_PROCESSES` | static | item |  |
+| `FRAME_UNSEALED` | static | item |  |
 | `INIT_CALLS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `INIT_EXITED` | static | item |  |
 | `INIT_INPUTS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -2875,6 +2877,7 @@ checks above is `pub` for raised checks (F3).
 | `ROOT_PID1` | static | load |  |
 | `SCHEDULER_BRING_UP` | static | bin |  |
 | `SCHEDULE_EDF` | static | bin |  |
+| `SCHEDULE_WINDOWS` | static | bin |  |
 | `SECONDARY_START` | static | bin |  |
 | `SERVICES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SMBIOS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -3019,6 +3022,7 @@ checks above is `pub` for raised checks (F3).
 | `drained` | fn | load |  |
 | `evacuate_with_fired_for_check` | fn | load (checks) | checks-only |
 | `exit_leaving` | fn | load |  |
+| `give_way` | fn | item (checks) | checks-only |
 | `holds_arm_on` | fn | load (checks) | checks-only |
 | `in_call_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
@@ -3067,6 +3071,8 @@ checks above is `pub` for raised checks (F3).
 | `reserve_check` | mod | bin |  |
 | `trip` | mod | item, load |  |
 | `vtime` | mod | item, load |  |
+| `windows` | mod | item |  |
+| `windows_check` | mod | bin |  |
 | `work` | mod | item, load, bin |  |
 | `AffinityRefusal` | re-export | item, load |  |
 | `Due` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -3315,6 +3321,23 @@ checks above is `pub` for raised checks (F3).
 | `WaitQueue::waits_ended_by_a_wake` | method | load |  |
 | `WaitQueue::wake_all` | method | item, load |  |
 | `WaitQueue::wakes` | method | load, bin |  |
+
+### `sched::windows`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `FIRST` | const | item |  |
+| `Refused` | enum | item, load |  |
+| `assign` | fn | item |  |
+| `seal_default` | fn | item |  |
+| `Refused::says` | method | item, load |  |
+
+### `sched::windows_check`
+
+| Item | Kind | Named by | Note |
+|---|---|---|---|
+| `after_seal` | fn | bin |  |
+| `run` | fn | bin |  |
 
 ### `sched::work`
 
@@ -4024,6 +4047,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `run` | fn | bin |  |
+| `set_frame_check` | fn | bin |  |
 | `set_promise_check` | fn | bin |  |
 | `set_region_check` | fn | bin |  |
 | `set_seal_check` | fn | bin |  |

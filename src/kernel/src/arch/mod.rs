@@ -150,6 +150,13 @@ mod arm_common;
 /// halt from a power-off.
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::shutdown as power_off;
+// Whether `schedule=windows`' check judges by this architecture's timer (K9 §4, WX.4).
+#[cfg(all(
+    target_arch = "aarch64",
+    ferrix_schedule = "windows",
+    ferrix_checks = "on"
+))]
+pub(crate) use aarch64::WINDOW_TIMER_HONEST;
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
     ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame,
@@ -187,6 +194,8 @@ pub use aarch64::{
     drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps,
     kernel_write_protected, wait_for_interrupt, wait_for_work,
 };
+#[cfg(all(target_arch = "arm", ferrix_schedule = "windows", ferrix_checks = "on"))]
+pub(crate) use armv7a::WINDOW_TIMER_HONEST;
 /// As AArch64's.
 #[cfg(target_arch = "arm")]
 pub use armv7a::shutdown as power_off;
@@ -227,6 +236,12 @@ pub use armv7a::{
     drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps,
     kernel_write_protected, wait_for_interrupt, wait_for_work,
 };
+#[cfg(all(
+    target_arch = "x86_64",
+    ferrix_schedule = "windows",
+    ferrix_checks = "on"
+))]
+pub(crate) use x86_64::WINDOW_TIMER_HONEST;
 // What `/proc/cpuinfo` reads of the processor: `CPUID` and the vector state
 // programs may use on x86-64, each processor's `MIDR` on the Arm pair; the
 // other architectures' answer is none.

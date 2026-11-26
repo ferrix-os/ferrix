@@ -40,7 +40,7 @@
 use alloc::boxed::Box;
 use core::cmp::Ordering;
 
-use crate::Entity;
+use crate::{Entity, EntityState};
 
 /// `a` is strictly before `b` in virtual time, which is allowed to wrap: two
 /// values are compared by the sign of their difference, which is right for
@@ -471,6 +471,242 @@ impl<T> Tree<T> {
     /// many entities the tree holds.
     pub(crate) fn check(&self) -> Result<usize, &'static str> {
         let (_, _, count) = check_node(&self.root, None, None)?;
+        Ok(count)
+    }
+}
+
+/// Where a node sorts in an [`Ordered`] set: its word, then its id, compared plainly.
+/// Never by [`before`], whose wrapping compare is right only within half the range
+/// (ledger 7460 WN.5): an `Ordered` key is not a time.
+const fn plain_key<T>(node: &Node<T>) -> (u64, u64) {
+    (node.entity.deadline, node.entity.id)
+}
+
+/// [`insert`], in [`Ordered`]'s plain order.
+fn insert_plain<T>(link: Link<T>, mut new: Box<Node<T>>) -> Box<Node<T>> {
+    let Some(mut node) = link else {
+        new.left = None;
+        new.right = None;
+        new.update();
+        return new;
+    };
+    if plain_key(&new) < plain_key(&node) {
+        node.left = Some(insert_plain(node.left.take(), new));
+    } else {
+        node.right = Some(insert_plain(node.right.take(), new));
+    }
+    rebalance(node)
+}
+
+/// [`remove`], in [`Ordered`]'s plain order.
+fn remove_plain<T>(link: Link<T>, key: (u64, u64)) -> (Link<T>, Option<Box<Node<T>>>) {
+    let Some(mut node) = link else {
+        return (None, None);
+    };
+    match key.cmp(&plain_key(&node)) {
+        Ordering::Less => {
+            let (left, found) = remove_plain(node.left.take(), key);
+            node.left = left;
+            (Some(rebalance(node)), found)
+        }
+        Ordering::Greater => {
+            let (right, found) = remove_plain(node.right.take(), key);
+            node.right = right;
+            (Some(rebalance(node)), found)
+        }
+        Ordering::Equal => {
+            let rest = match (node.left.take(), node.right.take()) {
+                (None, right) => right,
+                (left, None) => left,
+                (Some(left), Some(right)) => {
+                    let (right, mut successor) = remove_min(right);
+                    successor.left = Some(left);
+                    successor.right = right;
+                    Some(rebalance(successor))
+                }
+            };
+            (rest, Some(node))
+        }
+    }
+}
+
+/// Check an [`Ordered`] subtree: plain order strictly between `low` and `high`, heights
+/// and balance; the count it holds.
+fn check_plain<T>(
+    link: &Link<T>,
+    low: Option<(u64, u64)>,
+    high: Option<(u64, u64)>,
+) -> Result<(u8, usize), &'static str> {
+    let Some(node) = link else {
+        return Ok((0, 0));
+    };
+    let key = plain_key(node);
+    if low.is_some_and(|low| key <= low) || high.is_some_and(|high| key >= high) {
+        return Err("an ordered set's node is out of order");
+    }
+    if node.entity.payload.is_none() {
+        return Err("an ordered set's node holds no payload");
+    }
+    let (left, left_count) = check_plain(&node.left, low, Some(key))?;
+    let (right, right_count) = check_plain(&node.right, Some(key), high)?;
+    if node.height != 1 + left.max(right) {
+        return Err("an ordered set's height is wrong");
+    }
+    if left.abs_diff(right) > 1 {
+        return Err("an ordered set is out of balance");
+    }
+    Ok((node.height, left_count + right_count + 1))
+}
+
+/// A set of lent [`Slot`]s in the plain order of one word and an id: the run queue's
+/// AVL tree with no virtual time. `schedule=windows`'s fixed-priority class keeps its
+/// tasks in these (`docs/microkernel/K9.md` §4, ledger 7460 WN.6): insert, remove, the
+/// first, pop the first, find by id, and nothing else. No eligibility walk, no weight or
+/// virtual-runtime arithmetic is reachable from it; the tree's minimum-vruntime field is
+/// kept up by the shared rebalancing and never read here. An entity's state rides in its
+/// node unchanged, so what goes in comes out.
+#[derive(Debug)]
+pub struct Ordered<T> {
+    root: Link<T>,
+    len: usize,
+}
+
+impl<T> Default for Ordered<T> {
+    fn default() -> Ordered<T> {
+        Ordered::new()
+    }
+}
+
+impl<T> Ordered<T> {
+    /// An empty set.
+    #[must_use]
+    pub const fn new() -> Ordered<T> {
+        Ordered { root: None, len: 0 }
+    }
+
+    /// How many it holds.
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether it holds none.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Put `payload` in under `key`, in the slot it came in, with `state` kept as given.
+    /// Two entries with one id are the caller's error; the set holds both.
+    pub fn insert(&mut self, id: u64, key: u64, payload: T, state: EntityState, slot: Slot<T>) {
+        let mut node = slot.0;
+        node.entity = Entity {
+            id,
+            weight: state.weight,
+            vruntime: state.vlag.cast_unsigned(),
+            deadline: key,
+            sum_exec: state.sum_exec,
+            request_ns: state.request_ns,
+            payload: Some(payload),
+        };
+        self.root = Some(insert_plain(self.root.take(), node));
+        self.len += 1;
+    }
+
+    fn detach(node: Box<Node<T>>) -> Option<crate::Left<T>> {
+        let mut node = node;
+        let entity = &mut node.entity;
+        let payload = entity.payload.take()?;
+        let state = EntityState {
+            weight: entity.weight,
+            vlag: entity.vruntime.cast_signed(),
+            sum_exec: entity.sum_exec,
+            request_ns: entity.request_ns,
+        };
+        Some((entity.id, payload, state, Slot(node)))
+    }
+
+    /// The first in order: its id, its key and its payload.
+    #[must_use]
+    pub fn first(&self) -> Option<(u64, u64, &T)> {
+        let mut node = self.root.as_ref()?;
+        while let Some(left) = node.left.as_ref() {
+            node = left;
+        }
+        Some((
+            node.entity.id,
+            node.entity.deadline,
+            node.entity.payload.as_ref()?,
+        ))
+    }
+
+    /// Take the first out.
+    pub fn pop_first(&mut self) -> Option<crate::Left<T>> {
+        let root = self.root.take()?;
+        let (rest, min) = remove_min(root);
+        self.root = rest;
+        self.len -= 1;
+        Self::detach(min)
+    }
+
+    /// The key of `id`, a walk of the set.
+    #[must_use]
+    pub fn key_of(&self, id: u64) -> Option<u64> {
+        find(&self.root, id).map(|key| key.deadline)
+    }
+
+    /// Take `id` out.
+    pub fn remove(&mut self, id: u64) -> Option<crate::Left<T>> {
+        let key = self.key_of(id)?;
+        let (rest, found) = remove_plain(self.root.take(), (key, id));
+        self.root = rest;
+        let node = found?;
+        self.len -= 1;
+        Self::detach(node)
+    }
+
+    /// The payload of `id`, and its state.
+    #[must_use]
+    pub fn get(&self, id: u64) -> Option<(&T, u32)> {
+        fn at<T>(link: &Link<T>, id: u64) -> Option<&Entity<T>> {
+            let node = link.as_ref()?;
+            if node.entity.id == id {
+                return Some(&node.entity);
+            }
+            at(&node.left, id).or_else(|| at(&node.right, id))
+        }
+        let entity = at(&self.root, id)?;
+        Some((entity.payload.as_ref()?, entity.weight))
+    }
+
+    /// Visit each, in order: its id, its key, its payload and the weight it came with.
+    pub fn for_each(&self, mut visit: impl FnMut(u64, u64, &T, u32)) {
+        walk(&self.root, &mut |entity: &Entity<T>| {
+            if let Some(payload) = entity.payload.as_ref() {
+                visit(entity.id, entity.deadline, payload, entity.weight);
+            }
+        });
+    }
+
+    /// The id of the last in order whose payload satisfies `wanted`.
+    #[must_use]
+    pub fn last_where(&self, wanted: impl Fn(&T) -> bool) -> Option<u64> {
+        last_where(&self.root, &|entity: &Entity<T>| {
+            entity.payload.as_ref().is_some_and(&wanted)
+        })
+        .map(|key| key.id)
+    }
+
+    /// Check the order, the heights and the count.
+    ///
+    /// # Errors
+    ///
+    /// Which of them is wrong.
+    pub fn check(&self) -> Result<usize, &'static str> {
+        let (_, count) = check_plain(&self.root, None, None)?;
+        if count != self.len {
+            return Err("an ordered set's count is wrong");
+        }
         Ok(count)
     }
 }

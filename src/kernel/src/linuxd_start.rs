@@ -350,6 +350,9 @@ fn start(
     let partition = job::root()
         .new_child_as(!further.is_empty(), false)
         .map_err(|_| "no job for the partition")?;
+    #[cfg(ferrix_schedule = "windows")]
+    crate::sched::windows::assign(&partition, crate::sched::windows::FIRST)
+        .map_err(|_| "the partition's job took no partition")?;
     for (index, row) in further.iter().enumerate() {
         if let Err(why) = start_further(cmdline, index + 1, row, &archive, archive_len) {
             println!("  linuxd {} did not start: {why}", index + 1);
@@ -498,6 +501,9 @@ fn start_further(
     let partition = job::root()
         .new_child_as(true, false)
         .map_err(|_| "no job for it")?;
+    #[cfg(ferrix_schedule = "windows")]
+    crate::sched::windows::assign(&partition, crate::sched::windows::FIRST)
+        .map_err(|_| "its job took no partition")?;
     // K16 §4: this partition's memory is a promise, as the first's is.
     #[cfg(ferrix_kernel_memory = "retyped")]
     partition

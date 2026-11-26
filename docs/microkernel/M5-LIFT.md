@@ -583,6 +583,17 @@ shape-specific kernel code: **it goes if K3 comes back** (M6, R3).
   must fail closed, is not built**: until it is, `test-mce` under user shows nothing about
   it; W8's controls; requirements from the block.
 
+### linuxd's differences from Linux under `schedule=windows` (K9 §4, ledger 7460 WN.10, 7540 WX.8)
+
+A program's nice is its level in its partition's fixed-priority set, nice -20..19 mapped into levels 10-39, beneath every
+server's 0-9: so `sched_setscheduler` and `sched_setattr` take `SCHED_OTHER` and `SCHED_BATCH` as the nice they carry, and
+`SCHED_IDLE` as nice 19's level, the lowest a program has, in both calls. `SCHED_FIFO`, `SCHED_RR` and `SCHED_DEADLINE` are refused
+`EPERM`, where Linux grants them to a privileged caller: a real-time policy would put a program at or above the servers'
+levels, and one spinning program would then stop devmgr, the drivers, btrfsd and linuxd itself. `sched_getscheduler` reads
+`SCHED_OTHER` after any of the three accepted. A `cpu.weight` write is refused (`EINVAL`): no weight is read. Cases: test-threads'
+sched-policy step, built for a windows kernel only: the three accepted by both calls and read back, the three refused
+`EPERM` by both, and 200 calls of a nice -20 program answered by linuxd beside a nice -20 spinner on every processor.
+
 ## Where it stands
 
 * **On `feature/mk-lift-land`, for landing:** one commit on K1 and K15, reviewed against

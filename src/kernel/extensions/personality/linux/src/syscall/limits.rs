@@ -425,6 +425,23 @@ pub(crate) fn sys_sched_setaffinity(
 /// `SCHED_OTHER`, the only policy this kernel runs anything under.
 const SCHED_OTHER: i32 = 0;
 
+/// `SCHED_IDLE`, which under `schedule=windows` is nice 19's level.
+#[cfg(ferrix_schedule = "windows")]
+const SCHED_IDLE: i32 = 5;
+
+/// Under `schedule=windows` (K9 §4, ledger 7460 WN.10): `SCHED_OTHER`, `SCHED_BATCH` and
+/// `SCHED_IDLE` are taken as the nice they carry, which is the task's level, and a real-time
+/// policy (`SCHED_FIFO`, `SCHED_RR`, `SCHED_DEADLINE`) is refused `EPERM`: no program reaches a
+/// level above the servers'. `None` for a policy Linux has no such number for.
+#[cfg(ferrix_schedule = "windows")]
+const fn windows_policy(policy: i32) -> Option<Result<(), Errno>> {
+    match policy {
+        0 | 3 | 5 => Some(Ok(())),
+        1 | 2 | 6 => Some(Err(Errno::EPERM)),
+        _ => None,
+    }
+}
+
 /// The pid checks every `sched_*param` and `sched_*scheduler` call makes
 /// first: a null structure or a negative pid is `EINVAL` before any lookup.
 fn param_args(pid: i32, at: u64) -> Result<(), Errno> {
@@ -551,6 +568,24 @@ pub(crate) fn sys_sched_setattr(
     }
     let keep_policy = attr.flags & SCHED_FLAG_KEEP_POLICY != 0;
     let keep_params = attr.flags & SCHED_FLAG_KEEP_PARAMS != 0;
+    #[cfg(ferrix_schedule = "windows")]
+    let attr = {
+        let mut attr = attr;
+        if !keep_policy {
+            match windows_policy(i32::try_from(attr.policy).unwrap_or(-1)) {
+                Some(Err(refused)) => return Err(refused),
+                Some(Ok(())) => {
+                    // `SCHED_IDLE` is nice 19's level, the lowest a program has (WX.8).
+                    if attr.policy == SCHED_IDLE as u32 {
+                        attr.nice = 19;
+                    }
+                    attr.policy = SCHED_OTHER as u32;
+                }
+                None => return Err(Errno::EINVAL),
+            }
+        }
+        attr
+    };
     if attr.flags & !(SCHED_FLAG_KEEP_POLICY | SCHED_FLAG_KEEP_PARAMS) != 0
         || (!keep_policy && attr.policy != SCHED_OTHER as u32)
         || attr.priority != 0
@@ -726,11 +761,28 @@ pub(crate) fn sys_sched_setscheduler(
     param_args(pid, at)?;
     let priority = uaccess::get_u32(process.space(), at)?;
     let target = subject(process, pid)?;
+    #[cfg(ferrix_schedule = "windows")]
+    match windows_policy(policy) {
+        Some(Err(refused)) => return Err(refused),
+        Some(Ok(())) if priority == 0 => {}
+        _ => return Err(Errno::EINVAL),
+    }
+    #[cfg(not(ferrix_schedule = "windows"))]
     if policy != SCHED_OTHER || priority != 0 {
         return Err(Errno::EINVAL);
     }
     if !credentials::same_owner(process, &target) {
         return Err(Errno::EPERM);
+    }
+    // `SCHED_IDLE` is nice 19's level, the lowest a program has, as `sched_setattr`'s (WX.8):
+    // a program's level beneath every server's (L.sched.169).
+    #[cfg(ferrix_schedule = "windows")]
+    if policy == SCHED_IDLE {
+        let thread = attributes::thread_named(process, pid).ok_or(Errno::ESRCH)?;
+        thread.set_nice(19);
+        if let Some(task) = attributes::task_of(&thread) {
+            attributes::apply_nice(thread.nice(), &task);
+        }
     }
     Ok(0)
 }

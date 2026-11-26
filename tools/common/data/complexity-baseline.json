@@ -65,8 +65,8 @@
       "recursive": false
     },
     "boot_authority.rs::try_start_manager": {
-      "complexity": 25,
-      "lines": 58,
+      "complexity": 26,
+      "lines": 61,
       "recursive": false
     },
     "device.rs::publish": {
@@ -135,13 +135,13 @@
       "recursive": false
     },
     "linuxd_start.rs::start": {
-      "complexity": 23,
-      "lines": 81,
+      "complexity": 24,
+      "lines": 84,
       "recursive": false
     },
     "linuxd_start.rs::start_further": {
-      "complexity": 21,
-      "lines": 110,
+      "complexity": 22,
+      "lines": 113,
       "recursive": false
     },
     "main.rs::bring_up_processors": {
@@ -166,7 +166,7 @@
     },
     "main.rs::start_scheduler": {
       "complexity": 6,
-      "lines": 76,
+      "lines": 82,
       "recursive": false
     },
     "object/mod.rs::signals": {
@@ -175,13 +175,18 @@
       "recursive": false
     },
     "object/process.rs::move_charged": {
-      "complexity": 16,
-      "lines": 48,
+      "complexity": 18,
+      "lines": 49,
+      "recursive": false
+    },
+    "sched/direct.rs::begin": {
+      "complexity": 15,
+      "lines": 28,
       "recursive": false
     },
     "sched/task.rs::new": {
       "complexity": 9,
-      "lines": 78,
+      "lines": 90,
       "recursive": false
     },
     "smp.rs::invalidate_pages": {

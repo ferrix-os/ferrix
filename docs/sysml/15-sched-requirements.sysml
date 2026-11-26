@@ -1439,5 +1439,206 @@ package FerrixSchedRequirements {
             attribute :>> parent = "H.SCHED.28";
             attribute :>> unit = ("sched::reserve::forget", "sched::reserve::give_back", "sched::affinity::set_affinity");
         }
+        requirement <'L.sched.153'> aWindowsPickReadsOnlyItsPartition : ItemLowLevel {
+            attribute :>> statement = "A window's pick shall read only its partition's set.";
+            attribute :>> criterion = "windows_check::run's samples, failure line `windows: a task ran outside its window past
+                the pick that ended it` (and `... and no pick after the window's end was
+                logged`, `... before its first one, or past the frames kept`), and
+                `windows: a task never ran in its window`; the host test
+                a_window_runs_only_its_partition_and_idles_when_empty. Control: the pick
+                ignores the window.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::queue::CpuQueue::pick_next");
+        }
+        requirement <'L.sched.154'> aWindowWithNothingOfItsPartitionIdles : ItemLowLevel {
+            attribute :>> statement = "A processor with no runnable task of the window's
+                partition shall be idle and halt; has_work shall read
+                the window's partition alone.";
+            attribute :>> criterion = "windows_check::run's gap looks, failure lines `windows: a processor in a gap read
+                another partition's task as work`, `windows: no look found the held
+                processor in a gap with work queued` and, in partition 0's window,
+                `windows: has_work was never read false in partition 0's window with the
+                partition-2 task queued`. Control: is_empty read for has_work.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::queue::CpuQueue::has_work");
+        }
+        requirement <'L.sched.155'> aHigherLevelPreemptsALower : ItemLowLevel {
+            attribute :>> statement = "Within a partition a higher level shall preempt a lower
+                at once.";
+            attribute :>> criterion = "The host tests; windows_check::run, failure line `windows: a lower level ran while a
+                higher one was runnable`.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::queue::CpuQueue::pick_next");
+        }
+        requirement <'L.sched.156'> equalsTakeTurnsOfAQuantum : ItemLowLevel {
+            attribute :>> statement = "Equal levels shall take turns of one 2 ms quantum,
+                counted in running time, its remainder kept across a
+                window's end.";
+            attribute :>> criterion = "The host tests; windows_check::run, failure line `windows: equals did not take turns`.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::queue::CpuQueue::pick_next");
+        }
+        requirement <'L.sched.157'> theSealRefusesOverlap : ItemLowLevel {
+            attribute :>> statement = "The seal shall refuse overlapping windows on one
+                processor.";
+            attribute :>> criterion = "windows_check's case. Control: the seal accepts overlap.";
+            attribute :>> parent = "H.SCHED.27";
+            attribute :>> unit = ("sched::windows::set_window");
+        }
+        requirement <'L.sched.158'> theSealRefusesAWindowPastTheMajorFrame : ItemLowLevel {
+            attribute :>> statement = "The seal shall refuse a window past major_ns.";
+            attribute :>> criterion = "windows_check's case.";
+            attribute :>> parent = "H.SCHED.27";
+            attribute :>> unit = ("sched::windows::check_seal");
+        }
+        requirement <'L.sched.159'> theSealRefusesAProcessorOutOfServiceOrWithoutPartitionZero : ItemLowLevel {
+            attribute :>> statement = "The seal shall refuse a window on a processor out of
+                service, and a processor in service with no partition-0
+                window of 500 us.";
+            attribute :>> criterion = "windows_check's cases.";
+            attribute :>> parent = "H.SCHED.27";
+            attribute :>> unit = ("sched::windows::check_seal");
+        }
+        requirement <'L.sched.160'> aSealedFrameStaysSealed : ItemLowLevel {
+            attribute :>> statement = "A second seal and a window after the seal shall be
+                refused, and a frame shall not be taken off once the
+                boot's is sealed.";
+            attribute :>> criterion = "windows_check's after-seal cases. Controls: the merged
+                pick read after the seal; a frame taken off after the
+                seal.";
+            attribute :>> parent = "H.SCHED.27";
+            attribute :>> unit = ("sched::windows::seal", "sched::windows::uninstall_check");
+        }
+        requirement <'L.sched.161'> noFirstProcessUnsealed : ItemLowLevel {
+            attribute :>> statement = "Unsealed, the boot authority shall start no first
+                process (FX-0927).";
+            attribute :>> criterion = "test-flags: xtask's seal_order_problem requires the seal's line before the first line of
+                any first process (partmgr's, devmgr's, linuxd's), by order, failure
+                line `under schedule=windows a first process's line came before the
+                seal's`; the stage panic. Control: an unsealed first process allowed.";
+            attribute :>> parent = "H.SCHED.27";
+            attribute :>> unit = ("boot_authority::run", "sched::windows::seal_default");
+        }
+        requirement <'L.sched.162'> aJobsPartitionIsFixedAtItsMaking : ItemLowLevel {
+            attribute :>> statement = "A job's partition shall be its parent's at its making; a
+                partition shall be refused for a job with a thread or
+                child, or not a child of the root, and partition 0 for
+                any job.";
+            attribute :>> criterion = "windows_check's job cases.";
+            attribute :>> parent = "H.SCHED.27";
+            attribute :>> unit = ("sched::windows::assign", "object::job::Job::partition", "object::job::Job::set_partition");
+        }
+        requirement <'L.sched.163'> kernelThreadsRunInPartitionZero : ItemLowLevel {
+            attribute :>> statement = "A kernel thread and a task with no job shall run in
+                partition 0 alone.";
+            attribute :>> criterion = "windows_check::run, failure line `windows: a kernel thread is not in partition 0` (the
+                check's own thread, and each it makes before it rehomes one); the
+                check's threads re-homed only by its own body. Control: a kernel thread
+                placed outside partition 0.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::task::Task::new");
+        }
+        requirement <'L.sched.164'> aWakeAcrossSendsNoKick : ItemLowLevel {
+            attribute :>> statement = "A wake of a task of another partition than the window's
+                at the wake's own instant shall send no kick, nor place the
+                task on a processor whose window then does not admit its
+                partition; one into the open window's partition shall kick
+                as before.";
+            attribute :>> criterion = "windows_check::run, failure lines `windows: no wake into another partition's window was
+                left unkicked`, `windows: a wake in partition 0's window kicked the
+                halted processor` and `windows: a wake in partition 0's window decided
+                no kick, suppressed or sent`; the host test
+                a_wake_reads_the_window_at_its_own_instant (a class last told the time
+                in an earlier frame's window). Control: the wake kicks across.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::wake_at_home", "sched::wake_onto", "sched::place_on_idle");
+        }
+        requirement <'L.sched.165'> aHandOverAcrossPartitionsDeclines : ItemLowLevel {
+            attribute :>> statement = "hand_over across partitions, or to a peer the window may
+                not run, shall decline.";
+            attribute :>> criterion = "windows_check::run under ipc_fastpath=on (the hand-over is built only there), failure
+                lines `windows: hand_over across partitions was accepted` and `... never
+                reached its partitions' test`; the declined count. Without the fast path
+                the line says no hand-over is built. Control: hand_over across
+                partitions accepted.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::direct::begin");
+        }
+        requirement <'L.sched.166'> movesStayInTheDestinationsPartition : ItemLowLevel {
+            attribute :>> statement = "Steal, balance, push and the wake's pull shall move only
+                a task of the destination's current partition.";
+            attribute :>> criterion = "windows_check::run's looks through latest_where, the body steal_candidate asks, failure
+                lines `windows: steal could take a task of a partition whose window was
+                not open` and `windows: no look found a task steal could take`; the host
+                test steal_sees_the_window_alone. Control: a steal of another
+                partition's task.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::queue::CpuQueue::steal_candidate");
+        }
+        requirement <'L.sched.167'> theOverrunIsMeasured : ItemLowLevel {
+            attribute :>> statement = "The overrun at each window's end shall be measured as
+                the time to the pick that ended it, every sample outside
+                a window shall lie before that pick, and the worst shall
+                be printed.";
+            attribute :>> criterion = "windows_check::run's line prints the worst overrun over the
+                windows a task ran past, the last sample past the end, with the pick's distance
+                beside it and a late pick after a last sample within the bound counted as a stall
+                (ledger 7732); on x86-64
+                failure line `windows: a window's end was overrun past its bound` (500 us);
+                AArch64 prints it unjudged. A window that ends with nothing of it running
+                prints its late pick as the worst start delay, counted and not judged
+                (ledger 7714 WJ.1-WJ.2).";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::windows::overruns");
+        }
+        requirement <'L.sched.168'> noFairRunQueueUnderWindows : ItemLowLevel {
+            attribute :>> statement = "Under schedule=windows no task shall be on a fair run
+                queue, and RunQueue's pick shall not be in the kernel.";
+            attribute :>> criterion = "check-kernel-shape.py's symbols; the boot's type check.
+                Control: the fair class's symbols planted.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::queue::CpuQueue::pick_next");
+        }
+        requirement <'L.sched.169'> aLevelIsTheNicesAndServersSitAbove : ItemLowLevel {
+            attribute :>> statement = "A task's level shall be its nice's, every server's above
+                every program's, and a cpu.weight write shall be
+                refused.";
+            attribute :>> criterion = "The level, in two halves. Its order: the host test
+                every_programs_level_is_beneath_every_servers over ferrix_sched_windows::level_of,
+                the body sched::windows::level_of calls, for nice -20 to 19 as a program against
+                every server's level, failure line `a program's level is not beneath every
+                server's`. Its liveness: test-threads' sched-policy step, linuxd answering
+                beside nice -20 spinners, failure line `the threads test's sched-policy step
+                (linuxd beside nice -20 spinners) did not end` or the step's own. The cpu.weight refusal:
+                object::rehome_check::check_the_weight under windows, failure line `a
+                job's weight was accepted under windows`. Controls: programs' levels not
+                beneath the servers'; cpu.weight accepted.";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::windows::level_of", "ferrix_sched_windows::level_of", "object::quota::unshared");
+        }
+        requirement <'L.sched.170'> aReturningProcessorTakesItsSealedRow : ItemLowLevel {
+            attribute :>> statement = "A processor back in service after the seal shall take
+                its sealed row, or be refused.";
+            attribute :>> criterion = "The accepted half: windows_check::after_seal, each
+                processor in service holds its sealed row and may come back. The refused half:
+                the host test a_processor_with_no_sealed_row_may_not_return, through
+                Windows::may_return, the body sched::windows::may_return calls.";
+            attribute :>> parent = "H.SCHED.27";
+            attribute :>> unit = ("sched::put_back_in_service", "sched::windows::may_return");
+        }
+        requirement <'L.sched.201'> theTimerIsAskedForEachWindowsEnd : ItemLowLevel {
+            attribute :>> statement = "Under schedule=windows the timer shall be asked for each
+                window's end, or a quantum's end before it, and what
+                reaches the timer shall be no later.";
+            attribute :>> criterion = "windows_check::run, every arm on the held processor: failure lines `windows: the
+                deadline asked at a window's end is not the window's end` (the ask),
+                `windows: the timer was asked later than the class's ask or the arm's
+                floor` (what reached the timer) and `windows: no arm on the held
+                processor was judged`; the line counts the arms the 20 us floor decided.
+                Controls: a quantum past the window (the ask), the one-shot armed later
+                (the timer).";
+            attribute :>> parent = "H.SCHED.26";
+            attribute :>> unit = ("sched::queue::CpuQueue::arm_timer");
+        }
     }
 }

@@ -119,6 +119,9 @@ pub const CORE_FLAG_WORD: u64 = flag_word(&build_flag_word!());
 // Only `schedule=edf` names it (sched/queue.rs).
 #[cfg(not(ferrix_schedule = "edf"))]
 use ferrix_sched_edf as _;
+// Only `schedule=windows` names it (sched/queue.rs).
+#[cfg(not(ferrix_schedule = "windows"))]
+use ferrix_sched_windows as _;
 pub mod arch;
 pub mod audit;
 pub mod backtrace;

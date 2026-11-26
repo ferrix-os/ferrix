@@ -86,6 +86,10 @@ enum Flavour {
 
 /// Build `threads-test` for `arch`, as the negative control or not, and return
 /// where the program is.
+/// The sched-policy step's first and last lines, owed under `schedule=windows` alone.
+const SCHED_POLICY: &str = "threads: sched-policy";
+const SCHED_POLICY_OK: &str = "threads: sched-policy ok";
+
 fn build(arch: Arch, negative: bool, i686: bool) -> Result<PathBuf> {
     build_flavour(
         arch,
@@ -106,7 +110,18 @@ fn build_flavour(arch: Arch, flavour: Flavour, i686: bool) -> Result<PathBuf> {
         Flavour::Negative => ("negative", Some("negative-control")),
         Flavour::StallProbe => ("stall-probe", Some("stall-probe")),
     };
-    let target_dir = paths::target_dir().join("threads-test").join(flavour);
+    // A `schedule=windows` kernel's program has the sched-policy step (ledger 7460 WN.10), and
+    // a directory of its own, so the two builds never stand in for each other.
+    let windows = crate::flags::this_run()?.value("schedule") == Some("windows");
+    let (flavour, features) = if windows {
+        (
+            format!("{flavour}-windows"),
+            Some(feature.map_or_else(|| "windows".to_owned(), |f| format!("{f},windows"))),
+        )
+    } else {
+        (flavour.to_owned(), feature.map(str::to_owned))
+    };
+    let target_dir = paths::target_dir().join("threads-test").join(&flavour);
     println!("  building threads-test ({flavour}) for {target}");
     let program = target_dir.join(target).join("release").join("threads-test");
     let mut build = crate::builds::Build::cargo(
@@ -116,8 +131,8 @@ fn build_flavour(arch: Arch, flavour: Flavour, i686: bool) -> Result<PathBuf> {
     .args(["build", "--release", "--target", target])
     .env("CARGO_TARGET_DIR", &target_dir)
     .output(&program);
-    if let Some(feature) = feature {
-        build = build.args(["--features", feature]);
+    if let Some(features) = &features {
+        build = build.args(["--features", features.as_str()]);
     }
     // Ferrix's own `.cargo/config.toml` uses this triple for the ARMv7-A
     // loader, with its linker script, and cargo merges a parent directory's
@@ -177,6 +192,7 @@ fn says(line: &str, want: &str) -> bool {
 /// shared and private, a private copy.
 ///
 /// Verifies: `L.object.314`
+/// Verifies: `L.sched.169`
 pub(crate) fn test_threads(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");
@@ -185,9 +201,34 @@ pub(crate) fn test_threads(args: &Args) -> Result<()> {
         // the first boot, records the negative control too.
         let program = build(arch, false, args.i686)?;
         let negative = build(arch, true, args.i686)?;
-        let lines = boot(arch, &program, args)?;
+        // Under `schedule=windows` the sched-policy step is owed in its place, and a boot that
+        // stops inside it says so by the step's name (ledger 7562 WZ.8): a starved linuxd
+        // answers nothing, so the step's own 30 s line may never be printed.
+        let windows = crate::flags::this_run()?.value("schedule") == Some("windows");
+        let lines = boot(arch, &program, args).map_err(|error| {
+            let said = std::fs::read_to_string(&log).unwrap_or_default();
+            let inside = said.lines().any(|line| says(line, SCHED_POLICY))
+                && !said.lines().any(|line| says(line, SCHED_POLICY_OK));
+            if windows && inside {
+                Error::new(format!(
+                    "{arch}: the threads test's sched-policy step (linuxd beside nice -20 \
+                     spinners) did not end within {}s.\n  Serial output is in {}",
+                    args.timeout,
+                    log.display()
+                ))
+            } else {
+                error
+            }
+        })?;
+        let steps: Vec<&str> = STEPS
+            .iter()
+            .flat_map(|&step| {
+                let policy = (windows && step == "threads: all ok").then_some(SCHED_POLICY_OK);
+                policy.into_iter().chain(core::iter::once(step))
+            })
+            .collect();
         let mut remaining = lines.iter();
-        for want in STEPS {
+        for want in steps {
             if !remaining.any(|line| says(line, want)) {
                 let failed = lines.iter().find(|line| line.contains("threads: FAILED"));
                 return Err(Error::new(format!(

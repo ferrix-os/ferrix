@@ -38,6 +38,8 @@ use ferrix_sync::{IrqControl, SpinLock};
 
 use super::queue::CpuQueue;
 use super::task::{BLOCKED, RUNNABLE, Task};
+#[cfg(ferrix_schedule = "windows")]
+use super::windows;
 use super::{finish_switch, queue_of, switch_chosen, this_cpu, work};
 use crate::arch;
 use crate::object::quota;
@@ -202,6 +204,13 @@ pub(crate) fn begin(caller: &Task, peer: &Task) -> Result<Direct, Count> {
         || queue.fair.is_reserved(caller.id)
         || queue.fair.is_reserved(peer.id)
     {
+        return Err(Count::T12);
+    }
+    // Under windows, across partitions or to a peer the window may not run at this instant: a
+    // hand-over never moves time from one partition to another (K9 §4, L.sched.165). edf's
+    // test above is develop's as it was, so that edf's kernel is the one it was (7011 S.8).
+    #[cfg(ferrix_schedule = "windows")]
+    if windows::declines_hand_over(caller, peer, queue) {
         return Err(Count::T12);
     }
     // T13, the last look, under the lock every poster's wake takes before it

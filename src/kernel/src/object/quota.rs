@@ -1636,21 +1636,31 @@ pub fn effective(index: u32, base: u32) -> u32 {
 /// (`docs/OPAQUE-KERNEL.md` §9.11, J2; `ferrix_sched::carried_weight_with`).
 /// One walk, each level read once, as `effective`'s.
 pub fn effective_with(index: u32, base: u32, extra: i64) -> u32 {
-    let mut at = index;
-    let levels = core::iter::from_fn(|| {
-        let slot = slot(at)?;
-        // What the level below adds to this one's load, which the load is
-        // never taken to be less than, is applied in `carried_weight`: a
-        // task or job not yet counted, or counted a moment late, must not be
-        // scaled up by a load that leaves it out.
-        let load = slot.load.load(Ordering::Acquire);
-        let own = u32::try_from(slot.entity_weight()).unwrap_or(1);
-        at = slot.parent.load(Ordering::Acquire);
-        Some((own, load))
-    });
-    let clamped =
-        ferrix_sched::carried_weight_with(base, levels, extra).clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
-    u32::try_from(clamped).unwrap_or(NICE_0_WEIGHT)
+    // No job weights under windows: a task's level is its nice's, and what the fair class
+    // would carry is never computed (C3, ledger 7460 WN.9).
+    #[cfg(ferrix_schedule = "windows")]
+    {
+        let _ = (index, extra);
+        base
+    }
+    #[cfg(not(ferrix_schedule = "windows"))]
+    {
+        let mut at = index;
+        let levels = core::iter::from_fn(|| {
+            let slot = slot(at)?;
+            // What the level below adds to this one's load, which the load is
+            // never taken to be less than, is applied in `carried_weight`: a
+            // task or job not yet counted, or counted a moment late, must not be
+            // scaled up by a load that leaves it out.
+            let load = slot.load.load(Ordering::Acquire);
+            let own = u32::try_from(slot.entity_weight()).unwrap_or(1);
+            at = slot.parent.load(Ordering::Acquire);
+            Some((own, load))
+        });
+        let clamped = ferrix_sched::carried_weight_with(base, levels, extra)
+            .clamp(MIN_EFFECTIVE, MAX_EFFECTIVE);
+        u32::try_from(clamped).unwrap_or(NICE_0_WEIGHT)
+    }
 }
 
 /// Every entity weight a job can be given fits a `u32`: the largest
@@ -1977,14 +1987,28 @@ pub fn check_idle_weight() -> Result<(), &'static str> {
     outcome
 }
 
+/// Under `schedule=windows` no share is carried (ledger 7460 WN.9, 7540 WX.7): each task stays at
+/// its own weight, whatever its job's, and that is what each of [`idle_cases`]'s share cases holds
+/// instead; its load cases keep L.object.185. Its rule is L.sched.169's.
+#[cfg(ferrix_schedule = "windows")]
+fn unshared(idle: u32, busy: u32) -> bool {
+    effective(idle, NICE_0_WEIGHT) == NICE_0_WEIGHT
+        && effective(busy, NICE_0_WEIGHT) == NICE_0_WEIGHT
+}
+
 /// The cases of [`check_idle_weight`].
 fn idle_cases(parent: u32, idle: u32, busy: u32) -> Result<(), &'static str> {
     let nice_0 = i64::from(NICE_0_WEIGHT);
     let load = |index: u32| slot(index).map_or(i64::MIN, |slot| slot.load.load(Ordering::Acquire));
+    #[cfg(not(ferrix_schedule = "windows"))]
     let even = NICE_0_WEIGHT / 2;
     adjust(idle, nice_0);
     adjust(busy, nice_0);
     let outcome = (|| {
+        #[cfg(ferrix_schedule = "windows")]
+        let unshared = || unshared(idle, busy);
+        #[cfg(ferrix_schedule = "windows")]
+        let even = NICE_0_WEIGHT;
         if (
             effective(idle, NICE_0_WEIGHT),
             effective(busy, NICE_0_WEIGHT),
@@ -2011,7 +2035,17 @@ fn idle_cases(parent: u32, idle: u32, busy: u32) -> Result<(), &'static str> {
         if load(parent) != nice_0 + IDLE_ENTITY_WEIGHT {
             return Err("a busy job set to cpu.idle did not give its parent the idle weight");
         }
+        // Develop's test as it was under every other schedule, so that their kernels are the
+        // ones they were (ledger 10714); windows' own beside it.
+        #[cfg(not(ferrix_schedule = "windows"))]
         if effective(idle, NICE_0_WEIGHT) > 3 || effective(busy, NICE_0_WEIGHT) <= 1000 {
+            return Err(
+                "a task of a job with cpu.idle set did not run at the idle weight beside a busy \
+                 sibling",
+            );
+        }
+        #[cfg(ferrix_schedule = "windows")]
+        if !unshared() {
             return Err(
                 "a task of a job with cpu.idle set did not run at the idle weight beside a busy \
                  sibling",

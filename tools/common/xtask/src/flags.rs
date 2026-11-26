@@ -1022,13 +1022,9 @@ mod tests {
                     assert_eq!(named, refused, "{why}");
                 }
             }
-            // An ad-hoc build from `max`'s values waits on `windows` still; from `fast`'s it
-            // builds, at no claim, as it says.
-            assert_eq!(
-                resolve(Some(profile), &lifted()).is_err(),
-                profile == "max",
-                "{profile}"
-            );
+            // An ad-hoc build from either profile's values builds, at no claim, as it says:
+            // `max`'s last unbuilt value, `schedule=windows`, is ad hoc since K9 §4.
+            assert!(resolve(Some(profile), &lifted()).is_ok(), "{profile}");
         }
     }
 

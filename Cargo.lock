@@ -637,6 +637,7 @@ dependencies = [
  "ferrix-qr",
  "ferrix-sched",
  "ferrix-sched-edf",
+ "ferrix-sched-windows",
  "ferrix-sha256",
  "ferrix-sync",
  "ferrix-vdso",
@@ -1315,6 +1316,14 @@ name = "ferrix-sched-edf"
 version = "0.3.1"
 dependencies = [
  "ferrix-sched",
+]
+
+[[package]]
+name = "ferrix-sched-windows"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sched",
+ "ferrix-sched-edf",
 ]
 
 [[package]]

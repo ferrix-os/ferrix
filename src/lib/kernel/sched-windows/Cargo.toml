@@ -1,0 +1,17 @@
+[package]
+name = "ferrix-sched-windows"
+description = "A static frame of time windows per processor, with fixed priorities inside each and no fair class"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrix-sched = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+ferrix-sched-edf = { workspace = true }

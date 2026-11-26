@@ -1492,6 +1492,9 @@ fn ferrocene_rust() -> Result<()> {
 /// (`check-load-ring.py`, failing on growth only with `--fail-on-growth`).
 /// The boot comes first, so a control of a static check shows a guest that
 /// started before the check fired. Every static check runs whichever fails.
+/// Under `schedule=windows` its boot owes the seal's line before linuxd's first program.
+///
+/// Verifies: L.sched.161
 fn test_flags(args: &Args) -> Result<()> {
     crate::test_boot(args)?;
     vector_verdict_named(args)?;
@@ -2519,9 +2522,10 @@ fn host_cargo(
 /// A test below reads `.github/workflows/ci.yml` and fails when the two
 /// disagree, so a step added to one and not the other is found by `cargo
 /// xtask check` rather than by a contributor who trusted `--miri`.
-const MIRI_PACKAGES: [&str; 19] = [
+const MIRI_PACKAGES: [&str; 20] = [
     "ferrix-elf",
     "ferrix-sched-edf",
+    "ferrix-sched-windows",
     "ferrix-bootinfo",
     "ferrix-ustack",
     "ferrix-objects",

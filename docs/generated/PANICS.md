@@ -121,6 +121,7 @@ Causes are listed most likely first.
 | [FX-0924](#fx-0924) | a fast crossing flipped a space with no normal root |
 | [FX-0925](#fx-0925) | a shared process or restricted mode did not do what K1 and K11 say |
 | [FX-0926](#fx-0926) | a criticality level did not keep a lower job from a higher one |
+| [FX-0927](#fx-0927) | the time windows' frame did not seal |
 | [FX-0928](#fx-0928) | a vector instruction in the kernel with CR0.TS set |
 | [FX-0929](#fx-0929) | a restricted window was not given back |
 | [FX-0930](#fx-0930) | a process built by its creator was not held to the rules of its making |
@@ -138,6 +139,7 @@ Causes are listed most likely first.
 | [FX-0954](#fx-0954) | the partition manager ended |
 | [FX-0955](#fx-0955) | linuxd's memory could not be promised as K16 asks |
 | [FX-0970](#fx-0970) | a time reservation did not behave as the scheduler promises |
+| [FX-0971](#fx-0971) | a time window did not behave as the scheduler promises |
 | [FX-0972](#fx-0972) | a boot check on a worker did not run to its end |
 | [FX-0973](#fx-0973) | a reclaim began inside a reclaim |
 | [FX-0974](#fx-0974) | a task tried to block holding an IrqSpinLock |
@@ -3056,6 +3058,24 @@ child above it, or a refusal went unaudited, or jammed a channel.
 See: src/kernel/src/object/level.rs; src/kernel/src/object/level_check.rs;
 docs/microkernel/K17.md.
 
+<a id="fx-0927"></a>
+
+## FX-0927 — the time windows' frame did not seal
+
+Under `schedule=windows` the boot authority seals the kernel's frame of time
+windows before it starts any first process, and starts none without it: a
+partition with no window would never run, and one with another's would not be
+isolated in time.
+
+1. A processor in service with no room for the frame's windows, or none in
+   service.
+2. A change to the frame's default or to the seal's refusals.
+3. A first job that could not take its partition: a process or a child already
+   in it.
+
+See: src/kernel/src/sched/windows.rs; src/lib/kernel/sched-windows;
+docs/microkernel/K9.md.
+
 <a id="fx-0928"></a>
 
 ## FX-0928 — a vector instruction in the kernel with CR0.TS set
@@ -3342,6 +3362,23 @@ has the rest.
 
 See: src/kernel/src/sched/reserve.rs; src/lib/kernel/sched-edf;
 docs/microkernel/K9.md.
+
+<a id="fx-0971"></a>
+
+## FX-0971 — a time window did not behave as the scheduler promises
+
+Under `schedule=windows` a processor runs a task only inside a window of the
+task's partition, is idle in a window with nothing of its partition, runs a
+higher level first and equals in turn, and refuses a frame that overlaps,
+overruns or leaves the kernel no window.
+
+1. A change to the class's pick, the frame's search or the seal's refusals.
+2. A door that moves a task across partitions.
+3. A host that stalls the processor long enough to take the check past its
+   slack.
+
+See: src/kernel/src/sched/windows.rs; src/kernel/src/sched/windows_check.rs;
+src/lib/kernel/sched-windows; docs/microkernel/K9.md.
 
 <a id="fx-0972"></a>
 

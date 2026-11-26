@@ -946,6 +946,22 @@ package FerrixItemRequirements {
             attribute :>> criterion = "L.sched.179 to L.sched.183. No timing claim.";
             attribute :>> parent = "ASR-8";
         }
+        requirement <'H.SCHED.26'> aPartitionRunsOnlyInItsWindows : ItemHighLevel {
+            attribute :>> statement = "Under schedule=windows, after the seal, a task shall run on a
+                processor only inside a window of its own partition, and past the window's end only
+                until the first pick after it, the overrun measured; a processor in a window with
+                nothing of that partition runnable shall be idle.";
+            attribute :>> criterion = "L.sched.153 to L.sched.156, L.sched.163 to L.sched.169, L.sched.201.
+                The overrun is judged within 500 us on x86-64 and printed on AArch64.";
+            attribute :>> parent = "ASR-8";
+        }
+        requirement <'H.SCHED.27'> theFrameIsSealedBeforeAnyProgram : ItemHighLevel {
+            attribute :>> statement = "Under schedule=windows no first process shall start until the
+                kernel's frame is sealed, and the seal shall refuse a frame that overlaps, overruns its
+                major frame, names a processor out of service or leaves one with no partition-0 window.";
+            attribute :>> criterion = "L.sched.157 to L.sched.162, L.sched.170.";
+            attribute :>> parent = "ASR-8";
+        }
     }
 
     package Interrupts {

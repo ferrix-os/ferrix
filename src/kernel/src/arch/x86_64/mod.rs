@@ -549,6 +549,11 @@ pub(crate) fn publish_tables(_address: u64) {
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
+/// Whether `schedule=windows`' boot check judges a window's overrun and a late stamp by this
+/// architecture's timer (K9 §4, WX.4): yes, the gates boot x86-64 under KVM, whose timer is honest.
+#[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+pub(crate) const WINDOW_TIMER_HONEST: bool = true;
+
 /// Invalidate the translation of the page holding `address` — this
 /// processor's only, as [`flush_tlb`] is.
 pub(crate) fn flush_tlb_page(address: u64) {

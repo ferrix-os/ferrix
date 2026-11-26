@@ -4351,6 +4351,38 @@ pub static SCHEDULE_EDF: Explanation = Explanation {
     see: "src/kernel/src/sched/reserve.rs; src/lib/kernel/sched-edf; docs/microkernel/K9.md",
 };
 
+/// `docs/microkernel/K9.md` §4: `schedule=windows`'s frame did not seal.
+pub static FRAME_UNSEALED: Explanation = Explanation {
+    code: "FX-0927",
+    title: "the time windows' frame did not seal",
+    meaning: "Under `schedule=windows` the boot authority seals the kernel's frame of time windows \
+              before it starts any first process, and starts none without it: a partition with no \
+              window would never run, and one with another's would not be isolated in time.",
+    causes: &[
+        "A processor in service with no room for the frame's windows, or none in service.",
+        "A change to the frame's default or to the seal's refusals.",
+        "A first job that could not take its partition: a process or a child already in it.",
+    ],
+    see: "src/kernel/src/sched/windows.rs; src/lib/kernel/sched-windows; docs/microkernel/K9.md",
+};
+
+/// `docs/microkernel/K9.md` §4: `schedule=windows`'s boot check.
+pub static SCHEDULE_WINDOWS: Explanation = Explanation {
+    code: "FX-0971",
+    title: "a time window did not behave as the scheduler promises",
+    meaning: "Under `schedule=windows` a processor runs a task only inside a window of the task's \
+              partition, is idle in a window with nothing of its partition, runs a higher level \
+              first and equals in turn, and refuses a frame that overlaps, overruns or leaves the \
+              kernel no window.",
+    causes: &[
+        "A change to the class's pick, the frame's search or the seal's refusals.",
+        "A door that moves a task across partitions.",
+        "A host that stalls the processor long enough to take the check past its slack.",
+    ],
+    see: "src/kernel/src/sched/windows.rs; src/kernel/src/sched/windows_check.rs; \
+          src/lib/kernel/sched-windows; docs/microkernel/K9.md",
+};
+
 /// `docs/microkernel/BOOT-AUTHORITY.md` §1: a first process did not start.
 pub static FIRST_PROCESSES: Explanation = Explanation {
     code: "FX-0952",
@@ -4596,6 +4628,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     #[cfg(not(ferrix_shape = "micro"))]
     &STAGE9_REGIONS,
     &STAGE9_LEVELS,
+    &FRAME_UNSEALED,
     &VECTOR_IN_THE_KERNEL,
     #[cfg(ferrix_restricted_window = "on")]
     &WINDOW_HELD,
@@ -4616,6 +4649,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &PARTITION_MANAGER_ENDED,
     &RETYPED,
     &SCHEDULE_EDF,
+    &SCHEDULE_WINDOWS,
     #[cfg(not(ferrix_shape = "micro"))]
     &BOOT_CHECK_WORKER,
     &RECLAIM_IN_RECLAIM,

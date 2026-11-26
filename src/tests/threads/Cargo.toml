@@ -26,6 +26,8 @@ libc = "0.2"
 negative-control = []
 # Run only the stall-probe step (`cargo xtask stall-probe`, docs/ROBUSTNESS.md R5).
 stall-probe = []
+# The sched-policy step, for a `schedule=windows` kernel: xtask sets it from the run's flags.
+windows = []
 
 # ---------------------------------------------------------------------------
 # Lints

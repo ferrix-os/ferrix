@@ -183,6 +183,15 @@ pub(crate) fn publish_tables(address: u64) {
     flush_tlb_page(address);
 }
 
+/// Whether `schedule=windows`' boot check judges by this architecture's timer: no, and no ARMv7-A
+/// kernel builds `schedule=windows` (below).
+#[cfg(all(ferrix_schedule = "windows", ferrix_checks = "on"))]
+pub(crate) const WINDOW_TIMER_HONEST: bool = false;
+
+// ARMv7-A builds no `personality=user` kernel and its windows were never run (ledger 7549 WY.13).
+#[cfg(ferrix_schedule = "windows")]
+compile_error!("schedule=windows is not built for ARMv7-A: x86-64 and AArch64 only (K9 §4)");
+
 /// Invalidate the translation of the page holding `address` — on every core,
 /// as [`flush_tlb`] does.
 ///

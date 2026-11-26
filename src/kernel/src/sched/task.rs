@@ -376,6 +376,18 @@ pub struct Task {
     /// had before (ledger 7088 E.3).
     #[cfg(ferrix_schedule = "edf")]
     pub(crate) reserved_on: core::sync::atomic::AtomicUsize,
+    /// `schedule=windows`: its partition, its process's job's at its making and never changed
+    /// (a job's is fixed before it has a thread, and a process never moves across one), zero
+    /// for a kernel thread (K9 §4, L.sched.162, L.sched.163).
+    #[cfg(ferrix_schedule = "windows")]
+    pub(crate) partition: AtomicU8,
+    /// `schedule=windows`: whether it is a program's (a region's process: linuxd's Linux
+    /// programs), whose levels lie beneath every server's (WN.10).
+    #[cfg(ferrix_schedule = "windows")]
+    pub(crate) program: bool,
+    /// `schedule=windows`: its level, from its nice alone (WN.9), never a weight.
+    #[cfg(ferrix_schedule = "windows")]
+    pub(crate) level: AtomicU8,
     /// See `reserved_on`.
     #[cfg(ferrix_schedule = "edf")]
     pub(crate) mask_before: crate::sync::SpinLock<Option<CpuSet>>,
@@ -807,6 +819,18 @@ impl Task {
         Ok(Task {
             #[cfg(ferrix_schedule = "edf")]
             reserved_on: core::sync::atomic::AtomicUsize::new(usize::MAX),
+            #[cfg(ferrix_schedule = "windows")]
+            partition: AtomicU8::new(core.as_ref().map_or(0, |process| process.job().partition())),
+            #[cfg(ferrix_schedule = "windows")]
+            program: core
+                .as_ref()
+                .is_some_and(|process| process.region().is_some()),
+            #[cfg(ferrix_schedule = "windows")]
+            level: AtomicU8::new(super::windows::level_of(
+                weight,
+                core.as_ref()
+                    .is_some_and(|process| process.region().is_some()),
+            )),
             #[cfg(ferrix_schedule = "edf")]
             mask_before: crate::sync::SpinLock::new(None),
             id,
@@ -875,6 +899,12 @@ impl Task {
         Ok(Task {
             #[cfg(ferrix_schedule = "edf")]
             reserved_on: core::sync::atomic::AtomicUsize::new(usize::MAX),
+            #[cfg(ferrix_schedule = "windows")]
+            partition: AtomicU8::new(0),
+            #[cfg(ferrix_schedule = "windows")]
+            program: false,
+            #[cfg(ferrix_schedule = "windows")]
+            level: AtomicU8::new(super::windows::level_of(ferrix_sched::NICE_0_WEIGHT, false)),
             #[cfg(ferrix_schedule = "edf")]
             mask_before: crate::sync::SpinLock::new(None),
             id,
@@ -1239,6 +1269,11 @@ impl Task {
     /// Give it a new weight of its own: a nice value's.
     pub(crate) fn set_base_weight(&self, weight: u32) {
         self.base_weight.store(weight, Ordering::Relaxed);
+        #[cfg(ferrix_schedule = "windows")]
+        self.level.store(
+            super::windows::level_of(weight, self.program),
+            Ordering::Relaxed,
+        );
     }
 
     /// The weight it should run at now: its own, scaled by its job's share.

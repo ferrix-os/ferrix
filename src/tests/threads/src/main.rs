@@ -39,6 +39,9 @@
 //! * **slice-request**: `sched_setattr`'s slice request ([`slice_request`]).
 //! * **affinity**: `sched_setaffinity` pins, at once, another thread too, and
 //!   is inherited ([`affinity`]).
+//! * **sched-policy**: under a `schedule=windows` kernel only (the `windows`
+//!   feature), linuxd's policies and a program answered beside nice -20
+//!   spinners (`sched_policy`).
 
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -50,6 +53,8 @@ mod affinity;
 mod cpu_number;
 mod futex_signal;
 mod munmap_race;
+#[cfg(feature = "windows")]
+mod sched_policy;
 mod setuid;
 mod slice_request;
 mod stall_probe;
@@ -671,6 +676,9 @@ fn main() {
     println!("threads: affinity");
     affinity::check_affinity(fail);
     println!("threads: affinity ok");
+
+    #[cfg(feature = "windows")]
+    sched_policy::check_sched_policy(fail);
 
     println!("threads: all ok");
     std::process::exit(0)
