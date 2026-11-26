@@ -183,7 +183,10 @@ static TR_PICKS: AtomicU64 = AtomicU64::new(0);
 static TR_PICK_ASKED: [AtomicU64; 400] = [const { AtomicU64::new(0) }; 400];
 static TR_PICK_RAN: [AtomicU64; 400] = [const { AtomicU64::new(0) }; 400];
 static TR_PENDING: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
-static TR_IDS: [AtomicU64; THREADS] = [const { AtomicU64::new(u64::MAX) }; THREADS];
+/// Each spinner's task id plus one, 0 until stored (W1, ledger 10800: u64::MAX + 1 overflowed).
+static TR_IDS: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
+/// Per pick, a bit per partition with a task waiting in the held processor's class (W2).
+static TR_PICK_WAIT: [AtomicU64; 400] = [const { AtomicU64::new(0) }; 400];
 pub(crate) fn note_pick(class: &super::queue::Tier<Arc<Task>>) {
     if on_held() && class.part().is_some() {
         let n = TR_PICKS.fetch_add(1, Ordering::Relaxed) as usize;
@@ -195,8 +198,17 @@ pub(crate) fn note_pick(class: &super::queue::Tier<Arc<Task>>) {
             asked.store(crate::timer::requested_here(), Ordering::Relaxed);
             let picked = class.current().map_or(0, |task| task.id + 1);
             id.store(picked, Ordering::Relaxed);
-            if let Some(index) =
-                (0..THREADS).find(|&i| TR_IDS[i].load(Ordering::Relaxed) + 1 == picked)
+            let mut waiting = 0_u64;
+            class.for_each(|view| {
+                if !view.running {
+                    waiting |= 1 << (view.payload.partition.load(Ordering::Relaxed) & 63);
+                }
+            });
+            if let Some(wait) = TR_PICK_WAIT.get(n) {
+                wait.store(waiting, Ordering::Relaxed);
+            }
+            if let Some(index) = (0..THREADS)
+                .find(|&i| picked != 0 && TR_IDS[i].load(Ordering::Relaxed) == picked)
             {
                 TR_PENDING[index].store(n as u64 + 1, Ordering::Relaxed);
             }
@@ -1115,7 +1127,7 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     let unkicked = windows::unkicked();
     for (index, task) in threads.iter().enumerate() {
         if let Some(id) = TR_IDS.get(index) {
-            id.store(task.id, Ordering::Relaxed);
+            id.store(task.id + 1, Ordering::Relaxed);
         }
         if let Some(at) = TR_WOKE.get(index) {
             at.store(crate::timer::now_nanos(), Ordering::Relaxed);
@@ -1153,7 +1165,7 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
                 "idle"
             } else {
                 (0..THREADS)
-                    .find(|&i| TR_IDS[i].load(Ordering::Relaxed) + 1 == id)
+                    .find(|&i| TR_IDS[i].load(Ordering::Relaxed) == id)
                     .map_or("other", |i| NAMES[i])
             };
             {
@@ -1161,13 +1173,15 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
                 let asked = TR_PICK_ASKED[n].load(Ordering::Relaxed) as i64 - epoch;
                 let ran = TR_PICK_RAN[n].load(Ordering::Relaxed);
                 let ran = if ran == 0 { -1 } else { ran as i64 - epoch };
+                let wait = TR_PICK_WAIT[n].load(Ordering::Relaxed);
                 let _ = write!(
                     line,
-                    " {}/{}/{}:{}",
+                    " {}/{}/{}:{}~{:x}",
                     at / 1000,
                     asked / 1000,
                     ran / 1000,
-                    name
+                    name,
+                    wait
                 );
                 last_name = name;
             }
@@ -1222,11 +1236,50 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     // first runs at partition 2's window's start in that frame, its delay printed. Tried in up to
     // `TRIES` frames, since a look at the phase and the wake are not one instant.
     let mut halted = None;
-    for _ in 0..TRIES {
-        let phase = crate::timer::now_nanos().saturating_sub(epoch) % MAJOR;
+    // W5 (ledger 10800): per attempt, the instant planned, the look's, the wake's stamp, the
+    // stamp the task ran at, the check's processor and the step that ended it (1 look late,
+    // 2 wake outside partition 0's window, 3 no time to look, 4 judged).
+    let mut tr = [[0_u64; 7]; TRIES];
+    let tr_print = |tr: &[[u64; 7]; TRIES]| {
+        let rel = |time: u64| if time == 0 { -1 } else { time as i64 - epoch as i64 };
+        let mut line = alloc::string::String::new();
+        for (n, row) in tr.iter().enumerate() {
+            use core::fmt::Write;
+            if row[6] == 0 {
+                break;
+            }
+            let _ = write!(
+                line,
+                " {n}:{}/{}/{}/{}/{}c{}s{}",
+                rel(row[0]),
+                rel(row[1]),
+                rel(row[2]),
+                rel(row[3]),
+                rel(row[4]),
+                row[5],
+                row[6]
+            );
+            if line.len() > 150 {
+                crate::println!("  wn4      {line}");
+                line.clear();
+            }
+        }
+        crate::println!("  wn4      {line} (planned/look/woke/ran/sleepat in ns from epoch)");
+    };
+    for try_at in 0..TRIES {
+        let before_sleep = crate::timer::now_nanos();
+        let phase = before_sleep.saturating_sub(epoch) % MAJOR;
+        let planned = before_sleep + (3 * MS / 10 + MAJOR - phase) % MAJOR;
         super::sleep_for((3 * MS / 10 + MAJOR - phase) % MAJOR);
         let at = crate::timer::now_nanos();
         let phase = at.saturating_sub(epoch) % MAJOR;
+        if let Some(row) = tr.get_mut(try_at) {
+            row[0] = planned;
+            row[1] = at;
+            row[4] = before_sleep;
+            row[5] = super::current().map_or(98, |task| task.cpu() as u64);
+            row[6] = 1;
+        }
         // Aimed at 0.3 ms; a look that woke late is used up to 0.2 ms before the window opens.
         if phase >= MS - 200 * US {
             continue;
@@ -1239,6 +1292,10 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
         // WU.4: the attempt counts only when the wake's own stamp, not the look's, lies inside
         // [0, 1) ms of the frame, partition 0's window.
         let woke = crate::timer::now_nanos();
+        if let Some(row) = tr.get_mut(try_at) {
+            row[2] = woke;
+            row[6] = 2;
+        }
         if woke >= window_start || woke < window_start - MS {
             continue;
         }
@@ -1274,6 +1331,10 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
             super::sleep_for(MS);
         }
         let ran = WOKEN_AT.load(Ordering::Acquire);
+        if let Some(row) = tr.get_mut(try_at) {
+            row[3] = ran;
+            row[6] = if looks == 0 { 3 } else { 4 };
+        }
         // WR.4 (ledger 7648): a wake in the last 100 us before the window leaves no time to look,
         // so it is not an attempt; its stamp was waited for above, so the next starts clean.
         if looks == 0 {
@@ -1282,6 +1343,7 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
         // WS.1 (ledger 7645): every failure of this attempt prints its figures first.
         let end = window_start + 2 * MS;
         let fail = |why: &'static str| {
+            tr_print(&tr);
             print_attempt(ran, window_start, end, epoch, (woke, looks, quiet));
             Err(why)
         };
@@ -1323,6 +1385,7 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     }
     // WZ.7 (a): an attempt whose wake landed inside [0, 1) ms of the frame is required: one of
     // `TRIES`, since the check's own sleep may wake late on a loaded host (seen at load 36, KVM).
+    tr_print(&tr);
     let Some((halted, quiet)) = halted else {
         return Err("windows: no wake landed in partition 0's window in 50 frames");
     };
