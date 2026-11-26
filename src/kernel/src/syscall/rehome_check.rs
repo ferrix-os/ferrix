@@ -595,6 +595,16 @@ pub fn stage_core_objects() {
     println!(
         "  core obj {cases} cases of jobs, quotas and a process's core with kernel objects alone"
     );
+    #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"), ferrix_checks = "on"))]
+    {
+        use core::sync::atomic::Ordering;
+        let [held, moved] = &crate::object::rehome_check::LONGEST_HOLD;
+        println!(
+            "  addrwait ring 0's one bucket: the longest hold, a requeue of {} waiters, {} ns",
+            moved.load(Ordering::Relaxed),
+            held.load(Ordering::Relaxed),
+        );
+    }
     let cases = match crate::user::rehome_cache_check::run() {
         Ok(cases) => cases,
         Err(problem) => fatal!(

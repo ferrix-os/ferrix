@@ -801,5 +801,51 @@ fn check_one_sequence_is_seen_alike() -> Result<(), &'static str> {
     if seen != SEQUENCE {
         return Err("the address waits' compared sequence is seen differently under this memory model");
     }
+    #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+    the_longest_hold_is_measured(&space, &first, &second)?;
+    Ok(())
+}
+
+/// The longest hold of the address waits' one lock in ring 0 under `retyped`, in nanoseconds,
+/// and the waiters it moved: a requeue of every waiter the full bucket holds, within it, under
+/// one hold (ledger 10576 Q3, 10693 S2). Printed on the core objects' line.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"), ferrix_checks = "on"))]
+pub static LONGEST_HOLD: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+
+/// Fill the one bucket with taskless waiters until it refuses, requeue them all from one word
+/// to another under one hold, and keep how long that took; then wake them and give the bucket
+/// back. With index links a removal moves no entry, so the hold is one walk and one relink a
+/// waiter.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+#[cfg(ferrix_checks = "on")]
+fn the_longest_hold_is_measured(
+    space: &AddressSpace,
+    first: &crate::user::address_wait::Key,
+    second: &crate::user::address_wait::Key,
+) -> Result<(), &'static str> {
+    use crate::user::address_wait::{self, FIXED_WAITERS, MATCH_ANY, Word, sabotage};
+    let mut parked: alloc::vec::Vec<sabotage::Parked> = alloc::vec::Vec::new();
+    crate::fallible::try_reserve(&mut parked, FIXED_WAITERS)
+        .map_err(|_| "no memory for the longest hold's waiters")?;
+    while let Ok(waiter) = sabotage::park(first.clone(), MATCH_ANY) {
+        if let Err(waiter) = crate::fallible::push_within(&mut parked, waiter) {
+            waiter.leave();
+            break;
+        }
+    }
+    let count = parked.len();
+    let full = address_wait::bucket_room(0);
+    let start = crate::timer::now_nanos();
+    let moved = address_wait::requeue(space, first, second, (0, count), None::<&Word>);
+    let held = crate::timer::now_nanos().saturating_sub(start);
+    let woken = address_wait::wake(second, count, MATCH_ANY);
+    for waiter in parked {
+        waiter.leave();
+    }
+    if full.0 != full.1 || moved != Ok(count) || woken != count {
+        return Err("the longest hold's requeue did not move every waiter of the full bucket");
+    }
+    LONGEST_HOLD[0].store(held, Ordering::Relaxed);
+    LONGEST_HOLD[1].store(u64::try_from(count).unwrap_or(u64::MAX), Ordering::Relaxed);
     Ok(())
 }

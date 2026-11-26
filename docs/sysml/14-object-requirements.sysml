@@ -4161,7 +4161,8 @@ package FerrixObjectRequirements {
         requirement <'L.object.339'> ringZerosTablesAreTheirBootSize : ItemLowLevel {
             attribute :>> statement = "In ring 0 under kernel_memory=retyped the pid table shall hold FIXED_TASKS
                 entries, the quota table FIXED_JOBS slots and the address waits' one bucket FIXED_WAITERS, as many
-                as the tasks, each a static that is never grown; the entry past each shall be refused, and the
+                as the tasks, its waiters in arrival order by index links so that a removal moves no
+                entry, each a static that is never grown; the entry past each shall be refused, and the
                 description's max_processes shall limit the pid table to no more than it holds.";
             attribute :>> criterion = "object::rehome_check's boot-size case: each table its size, the pid table and
                 the quota table filled through their real calls until refused, then one given back taken again;
@@ -4180,7 +4181,11 @@ package FerrixObjectRequirements {
                 "object::process::Live::remove", "object::process::Live::iter", "object::process::fixed_entries",
                 "object::quota::find_free",
                 "user::address_wait::push_within", "user::address_wait::take_at",
-                "user::address_wait::Bucket::get", "user::address_wait::Bucket::iter_mut");
+                "user::address_wait::Bucket::iter_mut", "user::address_wait::Bucket::new",
+                "user::address_wait::Bucket::iter", "user::address_wait::Bucket::take_free",
+                "user::address_wait::Bucket::next_of", "user::address_wait::Bucket::set_next",
+                "user::address_wait::Bucket::set_prev", "user::address_wait::after",
+                "user::address_wait::entry_at", "user::address_wait::link");
             attribute :>> scope = "kernel_memory=retyped";
         }
         requirement <'L.object.340'> aFrameGoesBackWithNothingOnIt : ItemLowLevel {

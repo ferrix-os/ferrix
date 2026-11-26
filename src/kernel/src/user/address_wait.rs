@@ -417,10 +417,38 @@ fn push_within(table: &mut Bucket, entry: Entry) -> Result<(), Entry> {
     fallible::push_within(table, entry)
 }
 
-/// Take the entry at `index` off `table`, the ones after it moving up one.
+/// Where an entry is in a bucket: its index under heap.
 #[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
-fn take_at(table: &mut Bucket, index: usize) -> Option<Entry> {
-    (index < table.len()).then(|| table.remove(index))
+type Cursor = usize;
+
+/// The oldest entry's place in `table`.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+fn first(table: &Bucket) -> Option<Cursor> {
+    (!table.is_empty()).then_some(0)
+}
+
+/// The entry at `at`.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+fn entry_at(table: &Bucket, at: Cursor) -> Option<&Entry> {
+    table.get(at)
+}
+
+/// The place after `at`, in arrival order.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+fn after(table: &Bucket, at: Cursor) -> Option<Cursor> {
+    let next = at.checked_add(1)?;
+    (next < table.len()).then_some(next)
+}
+
+/// Take the entry at `at` off `table`, the ones after it moving up one, and answer it with
+/// the place of the one that followed it.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
+fn take_at(table: &mut Bucket, at: Cursor) -> (Option<Entry>, Option<Cursor>) {
+    if at >= table.len() {
+        return (None, None);
+    }
+    let taken = table.remove(at);
+    (Some(taken), (at < table.len()).then_some(at))
 }
 
 /// Waiters ring 0's one bucket holds under `retyped`: `N_waiters`, as many as the tasks its pid
@@ -428,27 +456,80 @@ fn take_at(table: &mut Bucket, index: usize) -> Option<Entry> {
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
 pub const FIXED_WAITERS: usize = crate::object::process::FIXED_TASKS;
 
-/// Ring 0's one bucket under `retyped`: a static list of [`FIXED_WAITERS`] entries in arrival
-/// order, the first `len` of them in use, so that nothing is made after boot, or at all (K16.9,
-/// L.object.339, H.MEM.33). A removal moves the ones after it up one (ledger 10576 Q1: the
-/// shift kept, its cost stated in docs/microkernel/K16.md §3).
+/// No slot: the end of a list.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+const NIL: u16 = u16::MAX;
+
+/// Ring 0's one bucket under `retyped`: a static of [`FIXED_WAITERS`] slots, the waiters in
+/// arrival order by index links inside the one locked value, and the free slots on a list of
+/// their own, so that nothing is made after boot, or at all (K16.9, L.object.339, H.MEM.33).
+/// A removal relinks two neighbours and moves no entry; a walk follows the waiters present
+/// (ledger 10576 Q1, 10693 S2).
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
 #[derive(Debug)]
 struct Bucket {
-    /// The entries, `len` of them first.
+    /// The entries, each slot in use on the waiters' list, the rest on the free list.
     slots: [Option<Entry>; FIXED_WAITERS],
+    /// A slot's next: the next younger waiter, or the next free slot.
+    next: [u16; FIXED_WAITERS],
+    /// A waiter's previous: the next older waiter.
+    prev: [u16; FIXED_WAITERS],
+    /// The oldest waiter, the youngest, the first slot given back, and the first never used.
+    head: u16,
+    tail: u16,
+    free: u16,
+    fresh: u16,
     /// How many are in use.
     len: usize,
 }
 
+/// Where an entry is in a bucket: its slot under `retyped`.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+type Cursor = u16;
+
+/// A link to `slot`, or [`NIL`] for none.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+const fn link(slot: Option<u16>) -> u16 {
+    match slot {
+        Some(slot) => slot,
+        None => NIL,
+    }
+}
+
+/// The slot a link names, if any.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn slot_of(link: u16) -> Option<u16> {
+    (link != NIL).then_some(link)
+}
+
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
 impl Bucket {
-    /// An empty bucket, made by the compiler.
+    /// An empty bucket, every slot never used, made by the compiler.
     const fn new() -> Bucket {
+        const _: () = assert!(FIXED_WAITERS < NIL as usize, "a slot's number fits a link");
         Bucket {
             slots: [const { None }; FIXED_WAITERS],
+            next: [NIL; FIXED_WAITERS],
+            prev: [NIL; FIXED_WAITERS],
+            head: NIL,
+            tail: NIL,
+            free: NIL,
+            fresh: 0,
             len: 0,
         }
+    }
+
+    /// A slot to fill: one given back, else the next never used; none when all are in use.
+    fn take_free(&mut self) -> Option<u16> {
+        if let Some(slot) = slot_of(self.free) {
+            self.free = link(self.next_of(slot));
+            return Some(slot);
+        }
+        let slot = self.fresh;
+        (usize::from(slot) < FIXED_WAITERS).then(|| {
+            self.fresh = slot + 1;
+            slot
+        })
     }
 
     fn len(&self) -> usize {
@@ -459,40 +540,101 @@ impl Bucket {
         self.slots.len()
     }
 
+    /// The link after `slot`.
+    fn next_of(&self, slot: u16) -> Option<u16> {
+        slot_of(*self.next.get(usize::from(slot))?)
+    }
+
+    /// The waiters, oldest first.
     fn iter(&self) -> impl Iterator<Item = &Entry> {
-        self.slots.iter().take(self.len).filter_map(Option::as_ref)
+        core::iter::successors(slot_of(self.head), |&slot| self.next_of(slot))
+            .take(self.len)
+            .filter_map(|slot| self.slots.get(usize::from(slot))?.as_ref())
     }
 
+    /// The waiters, in no order.
     fn iter_mut(&mut self) -> impl Iterator<Item = &mut Entry> {
-        let len = self.len;
-        self.slots.iter_mut().take(len).filter_map(Option::as_mut)
+        self.slots.iter_mut().filter_map(Option::as_mut)
     }
 
-    fn get(&self, index: usize) -> Option<&Entry> {
-        self.slots.get(index).filter(|_| index < self.len)?.as_ref()
+    /// Set `slot`'s next, or the head when `slot` is none.
+    fn set_next(&mut self, slot: Option<u16>, to: u16) {
+        match slot {
+            Some(slot) => {
+                if let Some(cell) = self.next.get_mut(usize::from(slot)) {
+                    *cell = to;
+                }
+            }
+            None => self.head = to,
+        }
+    }
+
+    /// Set `slot`'s previous, or the tail when `slot` is none.
+    fn set_prev(&mut self, slot: Option<u16>, to: u16) {
+        match slot {
+            Some(slot) => {
+                if let Some(cell) = self.prev.get_mut(usize::from(slot)) {
+                    *cell = to;
+                }
+            }
+            None => self.tail = to,
+        }
     }
 }
 
-/// Add `entry` at the end of `table`: answered back when the list is full.
+/// The oldest entry's place in `table`.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn first(table: &Bucket) -> Option<Cursor> {
+    slot_of(table.head)
+}
+
+/// The entry at `at`.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn entry_at(table: &Bucket, at: Cursor) -> Option<&Entry> {
+    table.slots.get(usize::from(at))?.as_ref()
+}
+
+/// The place after `at`, in arrival order.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+fn after(table: &Bucket, at: Cursor) -> Option<Cursor> {
+    table.next_of(at)
+}
+
+/// Add `entry` at the end of `table`, in a free slot: answered back when none is free.
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
 fn push_within(table: &mut Bucket, entry: Entry) -> Result<(), Entry> {
-    let Some(free) = table.slots.get_mut(table.len) else {
+    let Some(slot) = table.take_free() else {
         return Err(entry);
     };
-    *free = Some(entry);
+    let Some(cell) = table.slots.get_mut(usize::from(slot)) else {
+        return Err(entry);
+    };
+    *cell = Some(entry);
+    let tail = slot_of(table.tail);
+    table.set_next(Some(slot), NIL);
+    table.set_prev(Some(slot), link(tail));
+    table.set_next(tail, slot);
+    table.tail = slot;
     table.len += 1;
     Ok(())
 }
 
-/// Take the entry at `index` off `table`, the ones after it moving up one.
+/// Take the entry at `at` off `table`, relinking its neighbours and freeing its slot, and
+/// answer it with the place of the one that followed it. Moves no other entry.
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
-fn take_at(table: &mut Bucket, index: usize) -> Option<Entry> {
-    let len = table.len;
-    let used = table.slots.get_mut(index..len)?;
-    let taken = used.first_mut()?.take();
-    used.rotate_left(1);
-    table.len = len - 1;
-    taken
+fn take_at(table: &mut Bucket, at: Cursor) -> (Option<Entry>, Option<Cursor>) {
+    let Some(taken) = table.slots.get_mut(usize::from(at)).and_then(Option::take) else {
+        return (None, None);
+    };
+    let next = table.next_of(at);
+    let prev = table.prev.get(usize::from(at)).copied().and_then(slot_of);
+    table.set_next(prev, link(next));
+    table.set_prev(next, link(prev));
+    table.set_prev(Some(at), NIL);
+    table.set_next(Some(at), table.free);
+    table.free = at;
+    table.len -= 1;
+    (Some(taken), next)
 }
 
 /// Bucket `index` of [`TABLE`]. [`Key::bucket`] is the top [`BUCKET_BITS`]
@@ -878,10 +1020,13 @@ fn leave(sleeper: &Arc<Sleeper>, slot: usize) {
         if recorded.load(Ordering::Acquire) != bucket {
             continue;
         }
-        let mine = table
-            .iter()
-            .position(|entry| Arc::ptr_eq(&entry.sleeper, sleeper) && entry.slot == slot);
-        let mine = mine.and_then(|index| take_at(&mut table, index));
+        let mut at = first(&table);
+        while let Some(here) = at
+            && entry_at(&table, here).is_some_and(|entry| !(Arc::ptr_eq(&entry.sleeper, sleeper) && entry.slot == slot))
+        {
+            at = after(&table, here);
+        }
+        let mine = at.and_then(|here| take_at(&mut table, here).0);
         let due = shrink_due(&table);
         drop(table);
         drop(mine);
@@ -924,20 +1069,23 @@ fn rouse(keys: &[Key], limit: usize, bitset: u32, with: With) -> usize {
             let mut taken: [Option<Entry>; ROUND] = core::array::from_fn(|_| None);
             let mut full = false;
             let mut table = bucket_lock(bucket).lock();
-            let mut index = 0;
+            let mut at = first(&table);
             let mut held = 0;
             while counted < limit
-                && let Some(entry) = table.get(index)
+                && let Some(here) = at
+                && let Some(entry) = entry_at(&table, here)
             {
                 if !keys.contains(&entry.key) || entry.bitset & bitset == 0 {
-                    index += 1;
+                    at = after(&table, here);
                     continue;
                 }
                 let Some(place) = taken.get_mut(held) else {
                     full = true;
                     break;
                 };
-                let Some(entry) = take_at(&mut table, index) else {
+                let (entry, next) = take_at(&mut table, here);
+                at = next;
+                let Some(entry) = entry else {
                     break;
                 };
                 if with(&entry) {
@@ -1109,20 +1257,23 @@ fn take_and_move(
     (replaced, gone): (&mut Vec<Key>, &mut Vec<Entry>),
 ) -> usize {
     let mut taken = 0_usize;
-    let mut index = 0;
-    let mut end = source_table.len();
-    while index < end {
-        let Some(entry) = source_table.get(index) else {
-            break;
-        };
+    let mut at = first(source_table);
+    // Only the entries there when it began: a move within one bucket goes to its end.
+    let mut left = source_table.len();
+    while left > 0
+        && let Some(here) = at
+        && let Some(entry) = entry_at(source_table, here)
+    {
+        left -= 1;
         if entry.key != *source || taken >= most {
-            index += 1;
+            at = after(source_table, here);
             continue;
         }
-        let Some(mut entry) = take_at(source_table, index) else {
+        let (entry, next) = take_at(source_table, here);
+        at = next;
+        let Some(mut entry) = entry else {
             break;
         };
-        end -= 1;
         // A stale entry of a vector waiter already woken through another
         // word is taken off and counted neither as roused nor as moved.
         if entry.sleeper.is_woken() {
