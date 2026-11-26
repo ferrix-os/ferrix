@@ -91,7 +91,7 @@ why = "`max`: IEC 61508-3 SC 4 / ISO 26262 ASIL D (MICROKERNEL.md §6.5); DAL A'
 
 [flags.personality]
 why = "where the Linux ABI runs: as linuxd in user space, built into ring 0 through the shim (MICROKERNEL.md §4), or nowhere, with linux_abi=off (LINUX-ABI-SEPARATION.md §11.7: the Linux ABI's placement flag)"
-values.user = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "yes", built_on = ["aarch64"] }
+values.user = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "yes", built_on = ["x86_64", "aarch64"] }
 values.kernel = { allows = ["none"], lands = "today", built = "yes" }
 values.none = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["linux_abi=off"] }
 

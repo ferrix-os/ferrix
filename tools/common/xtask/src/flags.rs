@@ -1085,9 +1085,8 @@ mod tests {
                 "fault_ahead=on",
             ]
         );
-        // x86-64 by `personality=user` alone, whose `test-net` has not passed every run
-        // there (ledger 7485 D.1 (b), BACKLOG's paced row); the other five were.
-        assert_eq!(refused("x86_64"), ["personality=user"]);
+        // x86-64 since BACKLOG 603's cause was fixed (F-126, ledger 10333 P7): `fast` builds there.
+        assert!(built_for(&resolved, "x86_64").is_ok());
         assert!(built_for(&resolved, "aarch64").is_ok());
         let ad_hoc = resolve_unbuilt(None, &lifted()).unwrap();
         assert!(built_for(&ad_hoc, "armv7a").is_ok());
