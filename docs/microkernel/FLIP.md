@@ -24,11 +24,11 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | both | `personality=user` | `yes`, AArch64 alone (`built_on`) | x86-64: `test-net` FAILED 1 of 4 on the flip's hash, BACKLOG 603, so `fast` is refused there by this one name (ledger 7485 D.1, option (b)); ARMv7-A: in no claim (7016 B.1) | Flipped at 9ebe69358 (ledger 7363, 7485). x86-64 waits on four sightings of one signature (`paced-fetch 143`, the restart program's `wget` given no byte in 60 s, at about 76 s), never traced: `mkf-s3-net` 732aa199d, `mbl-g5e-net` 4d06c97ba, `mbl-g7-c1-net` 8b7e9226b, `mkf3b-net2-x86` 9ebe69358: traced to a cause outside the user kernel with a fix or a control and `test-net` PASSED, or a code change with its own review; then `x86_64` joins `built_on`. B.3 on that hash, `mkf3b-*`: `test-flags`, `test-linuxd`, `test-init`, `test-shell`, `test-vfs`, `test-threads --smp 2`, `test-seat`, `test-btrfs` PASSED on x86-64 KVM and AArch64 TCG; `test-net` on x86-64 FAILED 1 of 4 (above); B.3's controls re-FIRED per architecture: `mkf3b-tables-*` (5714 (16), case 52), `mkf3b-r5-*`, the copy-miss row's `mkf3b-copymiss-*`. AArch64's shim and linuxd build and run there (the old 144 errors are gone). `max` is refused by its other values |
 | both | `fs=server` | `yes`, x86-64 and AArch64 | ARMv7-A, as `personality=user` | Widened at 9ebe69358 with B.3's rows on its hash: `mkf3b-btrfs-*`, `mkf3b-restart2-*`, `mkf3b-init-*` PASSED |
 | `fast` | `partition_speculation=partition` | `yes`, x86-64 and AArch64 | | Flipped at 9ebe69358. Host: `syscall::region_check` on a Bare caller, every image (7184 B4.1). None at an exit: the regions line, held by `regions_problem`, `mkf2j-c-partition` FIRED. One at a partition switch: cases 193, 194, `domains.rs` (ledger 7216 T.1, 7249 N.1), which replace 7011 B.4's `test-netd` for this row; `test-netd`'s second partition stays M8's. No shipped job is marked (`JOB_SPECULATION_DOMAIN`), so every switch between spaces takes the full barrier, safe and stronger than the flag says; partmgr marking is an M5 row |
-| `max` | `partition_speculation=exit` | `adhoc` | a row of the value | B.4: the host and `regions_problem` are in: barriers equal exits, on KVM; AArch64 reads "decided" on TCG, labelled, BACKLOG's real core |
+| `max` | `partition_speculation=exit` | `yes`, x86-64 and AArch64 | | Flipped (ledger 10144), rows ad hoc, below (*`max`'s ad-hoc values*). The regions line says `exit` and 51 barriers on 51 exits, x86-64 KVM; AArch64 TCG reads the same count, of barriers decided and none issued, labelled "(decided: this processor model has no barrier to issue)": TCG measures no speculation, and the real core's row stays BACKLOG's (*AArch64's restricted exit on a real core*). The swap (the exit's barrier skipped) FIRED on both, case 82; the regions line made to say `partition` FIRED `regions_problem`. nm: `partition`'s `switch_barrier_offered` out, by the gate, with its plant FIRED. `exit`'s own barrier is inline at `restricted_left`: no symbol of its own |
 | `fast` | `restricted_fastpath=on` | `yes`, x86-64 and AArch64 | AArch64 holds no fast path: the general way, as its `why` says | Flipped at 9ebe69358. Code review given (ledger 7216). 6747 (2b)'s "drops the word term" withdrawn (7275). V.1-V.9, G.1, Z2-Z4 built: K1 §7.1's table, `check-linuxd-binary.py`, `check-kernel-shape.py`'s absent symbol. Rows on the flip's hash: `test-linuxd`, `test-threads --smp 2`, `test-shell`, `test-rustc` (x86-64) PASSED. nm: `ferrix_syscall_fast` and `fast_check` in under `fast` on x86-64, out under `off`, none on AArch64. `L.x86_64.272`-`.275` tagged, out of the baseline, with `.282` split from `.275` (7363 F.4); the anchors are the 20 units of 7363 (7008's "six" was never counted); coverage carried, none dropped; VULNERABILITY-ANALYSIS's entry (7249 (2), 7008 (4)) |
-| `max` | `restricted_fastpath=off` | `adhoc` | | B.5: general path, nm shows no fast function |
-| `fast` | `fault_ahead=on` | `yes`, x86-64 and AArch64 | | Flipped at 9ebe69358. B.6: E1 and E4's W+X built, controls FIRED; E3 on and off (`mkf3c-cont`, `-cont-off`, `mkf3f-threads2`, `mkf3c-threads-off`). E4's foreign half by argument, A6 a BACKLOG row at linuxd's first adoption (7275). nm: `fault_around`, `write_ahead` in `linuxd` under `on`, out under `off` |
-| `max` | `fault_ahead=off` | `adhoc` | | B.6: `test-threads`, `test-container`, the walk's control silent |
+| `max` | `restricted_fastpath=off` | `yes`, x86-64 and AArch64 | | Flipped (ledger 10144), rows ad hoc, below. The general path: `test-linuxd`, `test-threads --smp 2`, `test-shell` PASSED on x86-64 KVM and AArch64 TCG, `test-rustc` on x86-64. nm by the gate (`check-value-symbols.py` in `test-kernel-shape`): `ferrix_syscall_fast` and `fast_check::restricted_fast_counts` out under `off`, development and release, both architectures; in under `on` on x86-64, out on AArch64; the plant (build.rs giving the code `on`) FIRED |
+| `fast` | `fault_ahead=on` | `yes`, x86-64 and AArch64 | | Flipped at 9ebe69358. B.6: E1 and E4's W+X built, controls FIRED; E3 on and off (`mkf3c-cont`, `-cont-off`, `mkf3f-threads2`, `mkf3c-threads-off`). E4's foreign half by argument, A6 a BACKLOG row at linuxd's first adoption (7275). nm: `fault_around`, `write_ahead` in `linuxd` under `on`, out under `off`, by the gate since ledger 10144 (`n27c-r-shapein-*`). **F-122, open, Moderate**: E3's walk control (`write_ahead`'s room ignored) no longer fires under `on` (`n27c-r-walk-on-x86`, DID NOT FIRE on 8cb1eced0; FIRED as `mkm-o-walk` on 470b964ac); `on` stays built while the product is not shown wrong, and goes back to `adhoc` if the trace shows a charge or a mapping past a job's limit |
+| `max` | `fault_ahead=off` | `yes`, x86-64 and AArch64 | | Flipped (ledger 10144 X7), rows ad hoc, below. B.6's off half as amended by 10144 X7, which withdraws "the walk's control silent": `test-threads --smp 2` and `test-container` PASSED under `off` on x86-64 KVM and AArch64 TCG; nm by the gate: `fault_around`, `write_ahead` out of `linuxd` in the development and release builds on both, in under `on`, the plant (build.rs giving linuxd `on`) FIRED on both. The walk control is dead under `on` as well: that is `on`'s, F-122 |
 | `fast` | `schedule=edf` | `yes`, x86-64 and AArch64 | | Flipped at 9ebe69358: `test-flags` both, AArch64's `test-shell`, `test-threads --smp 2` PASSED; `test-kernel-symbols` re-read (`mkf3b-sym-*-present`). The fast path's decline on a channel: case 197, `restricted-check`, with its control. nm: `ferrix_sched_edf` in under `edf`, out under `fair`. `G.1`'s generic set over all three tiers with `windows` |
 | `max` | `schedule=windows` | `no` | no code | S.1, S.2, S.3, S.6: `ferrix-sched-windows`, fixed priorities inside windows (C6), no task on a fair run queue (C3) |
 | `max` | `kernel_memory=retyped` | `adhoc` | `Load(Copy(Fault))` unexplained; K16.5, K16.7, K16.9, F.8 | R.1 to R.5 |
@@ -139,8 +139,47 @@ test-mce-driver, test-postmortem, test-selfhost, test-gnome-apps, test-powerfail
 
 The dev-slot log held 216 lines after this sweep (of 2^15).
 
+## `max`'s ad-hoc values: B.2, B.4-B.7 (2026-11-26, ledger 10144)
+
+`max` itself does not build (`windows`, `retyped`), so these rows are **ad hoc, not `max`**: the values set
+by hand with `--no-claim --personality user --set fs=server --set partition_speculation=exit --set
+restricted_fastpath=off --set fault_ahead=off` (M below), and `fast`'s three for the "in" side (F:
+`partition`, `on`, `on`). The rest are `present`'s (`schedule=fair`, `kernel_memory=heap`), as
+`feature/mk-flip-trial`'s rows were for `fast`. Through `gate.sh`, `GATE_PRIORITY=1`, tags `n27c-r-*`, logs in
+`~/.local/share/ferrix/logs/queue/`, all on 8cb1eced0, the same flip before the review: an ad-hoc row reads no
+`built`, and what changed since under `src/` is nothing; the rows carry by the splitting rule (ledger 10144 (a), X4).
+x86-64 on KVM, AArch64 on TCG.
+
+| Row | x86-64 KVM | AArch64 TCG |
+|---|---|---|
+| `test-flags`, M: build line names the values; regions line `under \`exit\``, 51 barriers on 51 exits | PASSED `-flags-x86` | PASSED `-flags-a64`, labelled "(decided: this processor model has no barrier to issue)" |
+| `build --release`, M | PASSED `-rel-x86` | PASSED `-rel-a64` |
+| `test-kernel-shape`, M: nm, every value's symbols out | PASSED `-shape-x86` | PASSED `-shape-a64` |
+| `test-kernel-shape --release`, M: "out" judged on the LTO image | PASSED `-shaperel-x86` | PASSED `-shaperel-a64` |
+| `test-kernel-shape`, F: `ferrix_syscall_fast`, `restricted_fast_counts` (x86-64 only), `switch_barrier_offered`, `fault_around`, `write_ahead` in | PASSED `-shapein-x86` | PASSED `-shapein-a64` (no fast path symbol, as `on`'s `why` says) |
+| `test-linuxd`, M | PASSED | PASSED |
+| `test-threads --smp 2`, M | PASSED | PASSED |
+| `test-shell`, M | PASSED | PASSED |
+| `test-rustc`, M | PASSED `-rustc2-x86` with `FERRIX_RUSTC_SYSROOT` at the 1.99.1 volume. `-rustc-x86` FAILED first: the default volume `~/.local/share/ferrix/rustc` holds rustc 1.97.1 and xtask wants 1.99.1 ("rustc version false"), the host's volume, not the hash | NOT RUN: x86-64 binaries on the volume |
+| `test-container`, M | PASSED `-cont-x86` | PASSED `-cont-a64` |
+| B.4's swap: `restricted_left`'s barrier skipped under `exit` | FIRED `-swap-x86`, case 82 | FIRED `-swap-a64`, case 82 |
+| B.4's host: the regions line made to say `partition` | FIRED `-says-x86`, `regions_problem` | |
+| B.2's plants: build.rs gives the code a value the run's words do not (`--expect-host`, `check-value-symbols`) | FIRED `-plant-fast-x86` (`on`), `-plant-part-x86`, `-plant-fault-x86` | FIRED `-plant-part-a64`, `-plant-fault-a64` (no `on` plant: AArch64 builds no fast path under either) |
+| B.6's walk control (`write_ahead`'s room ignored) | DID NOT FIRE under M (`-walk-off-x86`) **and under F** (`-walk-on-x86`): dead, not silent, F-122; probes `-walk-probe-room`, `-walk-probe-take`, `-walk-probe-all`. Withdrawn from `off`'s conditions (10144 X7) | DID NOT FIRE under M (`-walk-off-a64`) |
+| B.7: `exit` back to `adhoc` in a copy of the flag file | FIRED `-b7-x86` (`a_profile_is_refused_for_exactly_what_it_waits_on`) | |
+
+First runs that ended in the command, not the hash: `n27c-flags-x86` (no `--no-claim`: the gate refused an ad-hoc
+build line as `present`'s run), `n27c-t-flags-x86`, `-a64` (the value set passed as one word, xtask's "unknown
+option"); each re-run as named.
+
+On the landing's hash, after ledger 10144's X1-X3 changed `check-value-symbols.py` and `test-kernel-shape` (X3, X4),
+tags `n27c-f-*`: `check`; `test-flags` M on x86-64 KVM and AArch64 TCG; `test-kernel-shape --personality user`
+as `gate-rows` lists it (x86-64), and under `present`'s own values on x86-64, AArch64 and ARMv7-A; the five plants
+and B.7's control again. The swap and the regions-line controls carry: neither file moved.
+
 ## Where it stands
 
+* 2026-11-26, ledger 10144: `max`'s `partition_speculation=exit`, `restricted_fastpath=off` and `fault_ahead=off` are `built` on x86-64 and AArch64, on rows ad hoc, not `max` (the section above). `max` is still refused, by `kernel_memory=retyped` and `schedule=windows`, and on x86-64 by `personality=user`'s `built_on` too (BACKLOG 603). F-122 is `fault_ahead=on`'s, open. M5's flip and M7 keep all of theirs.
 * 2026-11-05, ledger 7363, 7485: **`fast` builds on AArch64**, at level none held to sc2 (9ebe69358, the flip): x86-64 is refused by `personality=user` alone until `test-net`'s paced fetch is traced (BACKLOG 603); its six values flipped as data, B.7's list empty, `L.x86_64.272`-`.275` and `.282` tagged, the sweep above. `max` is still refused, by `exit`, `off`, `retyped`, `windows`. M5's flip and M7 keep all of theirs.
 * 2026-11-05: `fast` and `max` are still refused, by every line of the first table but `fs=server` on x86-64. Landed: the profiles' target, `built_on`, the signed slot, this file (9b5fa6957); `schedule=edf` dark and `lode`'s reload as a build value (fb32c5f77). AArch64's shim builds and runs Linux programs: `test-linuxd`, `test-shell`, `test-threads --smp 2` read PASSED under `--personality user` (`mkf-5-*`), `test-seat`, `test-init`, `test-btrfs` under `fs=server` (`mkf-s1-*`, older tree). None of it flips a `built`.
 * What stood before `fast` (met at 9ebe69358), in order: B.3's rows on the flip's hash; B.4's partition switch row (T.1); B.5's Z2-Z4, G.1, V.1-V.9 (ledger 7216); B.6's E1, E3, E4 and A6; edf's program row on a channel; LV.3's writer and framing test for AArch64; LV.5. Before `max`, beside those: `windows` (ledger 7088 W.1-W.4, S.1-S.3: no code yet, ids reserved), and `retyped`'s R.1-R.5.

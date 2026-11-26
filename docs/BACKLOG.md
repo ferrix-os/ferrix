@@ -707,6 +707,13 @@ log path and commit; a new sighting is added to its row the day it is seen.
 * `fault_ahead`'s five controls of 6537, A7, on this tree, with L.object.314's tag: its
   cases ran on `feature/mk-perf` (`logs/queue/mkp7-*`), not here; a neighbour's refused
   charge moving nothing in memory.events is still to read.
+* **F-122: `fault_ahead=on`'s walk control is dead (2026-11-26, ledger 10144 X6; owner sebastian-27c).** mkm-o-walk's
+  control (`write_ahead`'s `room` ignored) FIRED on 470b964ac (2026-11-04) and DID NOT FIRE on 8cb1eced0 under
+  `fault_ahead=on` (`n27c-r-walk-on-x86`); probes (`n27c-r-walk-probe-room`, `-probe-take`, `-probe-all`) show
+  `write_ahead` meeting no room at the walk's end and `memory.events` unmoved whether a neighbour there is taken
+  or refused. Not shown: the product charging past a limit. Next: bisect the control between the two hashes
+  (a156af89a a suspect), then a check that judges what the plant moves, its control FIRED on x86-64 and AArch64.
+  It is `on`'s alone: `off` is built without it (10144 X7).
 * A control for `Job::drop` forgetting its kernel job (6542, item 7).
 * `build_flag_word!`'s word: `FLAGS` is 19 under `personality=user`, and `audit_words` puts what its first word
   has no room for in the second's bits from 8 (ledger 7224); a const assert that those bits do not run out.
