@@ -4375,6 +4375,8 @@ pub static PARTITION_DESCRIPTION: Explanation = Explanation {
     causes: &[
         "The image was built with a description for another board.",
         "A multi-function device was only partly assigned.",
+        "Under kernel_memory=retyped: its max_processes asks for more than ring 0's fixed tables \
+         hold, or for fewer than the tasks already alive (K16.9).",
     ],
     see: "src/kernel/src/boot_authority.rs; src/lib/proto/partition-desc",
 };

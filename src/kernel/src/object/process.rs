@@ -1416,10 +1416,57 @@ fn numbered(live: &Live) -> impl Iterator<Item = (u32, &Entry)> {
     live.iter()
 }
 
-/// Put `entry` under `number`, which holds nothing; refused past [`FIXED_TASKS`], which a
-/// fork and a clone answer `EAGAIN` for.
+/// Tasks a process of the description is counted as, toward its `max_processes` (K16 §3's T):
+/// tonight's heaviest row held at most 63 tasks in ring 0, and `FIXED_TASKS` is 64 of these.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+pub const TASKS_PER_PROCESS: usize = 16;
+
+/// The tasks ring 0's table admits: [`FIXED_TASKS`] until the description sets fewer, once.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+static LIMIT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(FIXED_TASKS);
+
+/// Whether the description's limit has been set.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+static LIMIT_SET: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Hold ring 0's table to the description's `max_processes` (K16.9, ledger 10548 S3, Z3):
+/// `max_processes` times [`TASKS_PER_PROCESS`] tasks, zero meaning [`FIXED_TASKS`]. Set once,
+/// by the boot authority as it parses the description and before the manager's first
+/// instruction.
+///
+/// # Errors
+///
+/// A second set; a description asking for more than the table holds; or for fewer than the
+/// tasks already alive, the boot's own among them.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+pub fn limit_processes(max_processes: u32) -> Result<(), &'static str> {
+    if LIMIT_SET.swap(true, core::sync::atomic::Ordering::AcqRel) {
+        return Err("a second limit on the processes");
+    }
+    let tasks = match usize::try_from(max_processes) {
+        Ok(0) => FIXED_TASKS,
+        Ok(processes) => processes.saturating_mul(TASKS_PER_PROCESS),
+        Err(_) => usize::MAX,
+    };
+    if tasks > FIXED_TASKS {
+        return Err("the description asks for more processes than the kernel's tables hold");
+    }
+    let table = TABLE.lock();
+    if table.live.used > tasks {
+        return Err("the description asks for fewer processes than are already alive");
+    }
+    LIMIT.store(tasks, core::sync::atomic::Ordering::Release);
+    drop(table);
+    Ok(())
+}
+
+/// Put `entry` under `number`, which holds nothing; refused past [`FIXED_TASKS`], or past the
+/// description's limit ([`limit_processes`]), which a fork and a clone answer `EAGAIN` for.
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
 fn put(live: &mut Live, number: u32, entry: Entry) -> Result<(), AllocError> {
+    if live.used >= LIMIT.load(core::sync::atomic::Ordering::Acquire) {
+        return Err(AllocError);
+    }
     let slot = usize::try_from(number).map_err(|_| AllocError)?;
     let index = live
         .entries
