@@ -177,7 +177,21 @@ pub(crate) fn judge_requested(ask: Option<u64>, now: u64) {
 /// After every pick on the held processor while the check's frame is on it: a window's end a
 /// task still ran at, the pick that ended it (the class's own stamp, the samples' timescale),
 /// and the deadline the timer was asked for, logged once each (WX.3, WY.9).
+static TR_PICK_AT: [AtomicU64; 400] = [const { AtomicU64::new(0) }; 400];
+static TR_PICK_ID: [AtomicU64; 400] = [const { AtomicU64::new(0) }; 400];
+static TR_PICKS: AtomicU64 = AtomicU64::new(0);
+static TR_IDS: [AtomicU64; THREADS] = [const { AtomicU64::new(u64::MAX) }; THREADS];
 pub(crate) fn note_pick(class: &super::queue::Tier<Arc<Task>>) {
+    if on_held() && class.part().is_some() {
+        let n = TR_PICKS.fetch_add(1, Ordering::Relaxed) as usize;
+        if let (Some(at), Some(id)) = (TR_PICK_AT.get(n), TR_PICK_ID.get(n)) {
+            at.store(crate::timer::now_nanos(), Ordering::Relaxed);
+            id.store(
+                class.current().map_or(0, |task| task.id + 1),
+                Ordering::Relaxed,
+            );
+        }
+    }
     if !on_held() || class.part().is_none() {
         return;
     }
@@ -1083,6 +1097,9 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     HELD.store(held, Ordering::Release);
     let unkicked = windows::unkicked();
     for (index, task) in threads.iter().enumerate() {
+        if let Some(id) = TR_IDS.get(index) {
+            id.store(task.id, Ordering::Relaxed);
+        }
         if let Some(at) = TR_WOKE.get(index) {
             at.store(crate::timer::now_nanos(), Ordering::Relaxed);
         }
@@ -1109,6 +1126,36 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     // rather than by a kick case's that it also breaks.
     {
         let epoch = EPOCH.load(Ordering::Acquire) as i64;
+        let picks = (TR_PICKS.load(Ordering::Relaxed) as usize).min(400);
+        let mut line = alloc::string::String::new();
+        let mut last_name = "";
+        for n in 0..picks {
+            let at = TR_PICK_AT[n].load(Ordering::Relaxed) as i64 - epoch;
+            let id = TR_PICK_ID[n].load(Ordering::Relaxed);
+            let name = if id == 0 {
+                "idle"
+            } else {
+                (0..THREADS)
+                    .find(|&i| TR_IDS[i].load(Ordering::Relaxed) + 1 == id)
+                    .map_or("other", |i| NAMES[i])
+            };
+            if name != last_name {
+                use core::fmt::Write;
+                let _ = write!(
+                    line,
+                    " {}.{:03}:{}",
+                    at / 1_000_000,
+                    (at.rem_euclid(1_000_000)) / 1000,
+                    name
+                );
+                last_name = name;
+            }
+            if line.len() > 150 {
+                crate::println!("  wpicks  {line}");
+                line.clear();
+            }
+        }
+        crate::println!("  wpicks  {line} ({picks} picks)");
         let rel = |at: &[AtomicU64; THREADS], index: usize| load(at, index) as i64 - epoch;
         for index in 0..THREADS {
             crate::println!(
