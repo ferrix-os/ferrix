@@ -13,6 +13,15 @@
   "reservations": [
     {
       "ids": [
+        "L.iommu.110"
+      ],
+      "owner": "sebastian-27e",
+      "branch": "mk-e/k14-no-memory",
+      "date": "2026-11-26",
+      "purpose": "K14 at no memory (ledger 7166 F.3): in a kernel held to K14's grant a function whose unit refuses its attachment gets no domain, never an untranslated one; unit iommu::domain_placed (allotted by the coordinator in mk-allot.md)"
+    },
+    {
+      "ids": [
         "L.user.230-234",
         "L.object.373"
       ],
