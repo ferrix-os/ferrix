@@ -37,6 +37,11 @@ VALUE_SYMBOLS = (
     # linuxd's fault that brings neighbours (lift/core/fill.rs).
     ("fault_ahead", "on", "linuxd", "AddressSpace::fault_around", ("x86_64", "aarch64"), ()),
     ("fault_ahead", "on", "linuxd", "AddressSpace::write_ahead", ("x86_64", "aarch64"), ()),
+    # K16.9 (L.object.339, ledger 10505 C6, 10548 Z6 (ii)): ring 0's growing globals' growing
+    # paths are built under kernel_memory=heap alone, and the fixed form under retyped alone.
+    ("kernel_memory", "heap", "kernel", "user::address_wait::grow", ("x86_64", "aarch64"), ()),
+    ("kernel_memory", "retyped", "kernel", "object::process::fixed_entries", ("x86_64", "aarch64"),
+     (("checks", "on"),)),
 )
 
 
@@ -64,10 +69,11 @@ def holds(names: set[str], symbol: str) -> bool:
     return any(name == symbol or name.endswith(f"::{symbol}") for name in names)
 
 
-def judge(arch: str, values: dict[str, str], names: dict[str, set[str] | None], release: bool) -> tuple[list[str], list[str], int]:
+def judge(arch: str, values: dict[str, str], names: dict[str, set[str] | None], release: bool,
+          table: tuple = VALUE_SYMBOLS) -> tuple[list[str], list[str], int]:
     """What was read (lines to print), what breaks (problems), and how many symbols were judged."""
     read, problems, judged = [], [], 0
-    for flag, value, binary, symbol, arches, needs in VALUE_SYMBOLS:
+    for flag, value, binary, symbol, arches, needs in table:
         missing = [name for name in (flag, *(name for name, _ in needs)) if name not in values]
         if missing:
             problems.append(f"{arch}: `{symbol}`: the build's words name no {', '.join(missing)}")
@@ -115,6 +121,7 @@ def symbols(tool: list[str], path: str) -> set[str]:
 
 
 def self_test() -> int:
+    five = VALUE_SYMBOLS[:5]
     fast = {"restricted_fastpath": "on", "partition_speculation": "partition", "fault_ahead": "on", "checks": "on"}
     slow = {"restricted_fastpath": "off", "partition_speculation": "exit", "fault_ahead": "off", "checks": "on"}
     kernel_in = (
@@ -128,35 +135,44 @@ def self_test() -> int:
     )
     full = {"kernel": defined(kernel_in), "linuxd": defined(linuxd_in)}
     empty = {"kernel": defined("ffffffff80001000 T ferrix_syscall_stub\n"), "linuxd": defined("0000000000001000 T _start\n")}
-    assert judge("x86_64", fast, full, False)[1] == []
-    assert judge("x86_64", fast, full, False)[2] == 5
-    assert judge("x86_64", slow, empty, False)[1] == []
-    assert len(judge("x86_64", slow, full, False)[1]) == 5
-    assert len(judge("x86_64", fast, empty, False)[1]) == 5
+    assert judge("x86_64", fast, full, False, five)[1] == []
+    assert judge("x86_64", fast, full, False, five)[2] == 5
+    assert judge("x86_64", slow, empty, False, five)[1] == []
+    assert len(judge("x86_64", slow, full, False, five)[1]) == 5
+    assert len(judge("x86_64", fast, empty, False, five)[1]) == 5
     # Release: "in" is not judged, "out" is.
-    assert judge("x86_64", fast, empty, True)[1] == []
-    assert len(judge("x86_64", slow, full, True)[1]) == 5
+    assert judge("x86_64", fast, empty, True, five)[1] == []
+    assert len(judge("x86_64", slow, full, True, five)[1]) == 5
     # AArch64 has no fast path under either value: the two symbols must be out under `on` too.
     arm = {"kernel": full["kernel"] - {"ferrix_syscall_fast"}, "linuxd": full["linuxd"]}
-    assert "restricted_fast_counts" in judge("aarch64", fast, arm, False)[1][0]
+    assert "restricted_fast_counts" in judge("aarch64", fast, arm, False, five)[1][0]
     no_fast = {"kernel": defined("ffffffff80003000 T ferrix_kernel_core::arch::speculation_check::switch_barrier_offered\n"),
                "linuxd": full["linuxd"]}
-    assert judge("aarch64", fast, no_fast, False)[1] == []
+    assert judge("aarch64", fast, no_fast, False, five)[1] == []
     # A check-only symbol is out where the checks are.
-    assert judge("x86_64", dict(fast, checks="off"), {"kernel": defined("1 T ferrix_syscall_fast\n"), "linuxd": full["linuxd"]}, False)[1] == []
+    assert judge("x86_64", dict(fast, checks="off"), {"kernel": defined("1 T ferrix_syscall_fast\n"), "linuxd": full["linuxd"]}, False, five)[1] == []
     # No linuxd: its symbols are named NOT READ, never passed silently, and not counted as judged.
-    read, problems, judged = judge("x86_64", slow, {"kernel": empty["kernel"]}, False)
+    read, problems, judged = judge("x86_64", slow, {"kernel": empty["kernel"]}, False, five)
     assert problems == [] and judged == 3 and sum("NOT READ" in line for line in read) == 2
     # X1 (ledger 10144): a flag of the table, or one a symbol needs, absent from the words fails by name.
-    _, problems, _ = judge("x86_64", {k: v for k, v in slow.items() if k != "fault_ahead"}, empty, False)
+    _, problems, _ = judge("x86_64", {k: v for k, v in slow.items() if k != "fault_ahead"}, empty, False, five)
     assert len(problems) == 2 and all("name no fault_ahead" in problem for problem in problems)
-    _, problems, _ = judge("x86_64", {k: v for k, v in fast.items() if k != "checks"}, full, False)
+    _, problems, _ = judge("x86_64", {k: v for k, v in fast.items() if k != "checks"}, full, False, five)
     assert sum("name no checks" in problem for problem in problems) == 2
     # X2: a longer name that begins with a symbol's text is not that symbol, in or out.
     longer = {"kernel": defined("1 T ferrix_syscall_fast_unrelated\n2 t a::fast_check::restricted_fast_counts_of\n"),
               "linuxd": defined("3 t ferrix_kernel_core::user::space::AddressSpace::fault_around_count\n")}
-    assert judge("x86_64", slow, longer, False)[1] == []
-    assert len(judge("x86_64", fast, longer, False)[1]) == 5
+    assert judge("x86_64", slow, longer, False, five)[1] == []
+    assert len(judge("x86_64", fast, longer, False, five)[1]) == 5
+    # K16.9: the growing paths under heap, the fixed form under retyped, each alone.
+    k169 = VALUE_SYMBOLS[5:]
+    grows = defined("1 T ferrix_kernel_core::user::address_wait::grow\n2 T ferrix_kernel_core::user::address_wait::shrink\n")
+    fixed = defined("3 T ferrix_kernel_core::object::process::fixed_entries\n")
+    heap, retyped = {"kernel_memory": "heap", "checks": "on"}, {"kernel_memory": "retyped", "checks": "on"}
+    assert judge("x86_64", heap, {"kernel": grows}, False, k169)[1] == []
+    assert judge("aarch64", retyped, {"kernel": fixed}, False, k169)[1] == []
+    assert len(judge("x86_64", retyped, {"kernel": grows}, False, k169)[1]) == 2
+    assert len(judge("x86_64", heap, {"kernel": fixed}, False, k169)[1]) == 2
     print("check-value-symbols: self-test passed")
     return 0
 

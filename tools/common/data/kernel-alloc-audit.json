@@ -243,12 +243,12 @@
     },
     "object/process.rs": {
       "bucket": "job",
-      "what": "the process's job; gather's list is the caller's; process::TABLE must be sized by max_processes (K16.9)",
-      "sites": 9
+      "what": "the process's job; gather's list is the caller's; process::TABLE grows under heap and is a static of FIXED_TASKS in ring 0 under retyped (K16.9)",
+      "sites": 7
     },
     "object/quota.rs": {
       "bucket": "pool",
-      "what": "the slot table's chunks: sized by the description under retyped",
+      "what": "the slot table's chunks under heap; a static of FIXED_JOBS in ring 0 under retyped (K16.9)",
       "sites": 2
     },
     "object/region.rs": {
@@ -333,8 +333,8 @@
     },
     "user/address_wait.rs": {
       "bucket": "job",
-      "what": "the waiter's job; grow and shrink of the shared table are a finding: a fixed block under retyped",
-      "sites": 20
+      "what": "the waiter's job; the shared table grows and shrinks under heap and is one static bucket of FIXED_WAITERS in ring 0 under retyped (K16.9)",
+      "sites": 18
     },
     "user/cache.rs": {
       "bucket": "job",
