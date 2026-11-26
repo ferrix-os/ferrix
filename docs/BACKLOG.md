@@ -754,8 +754,12 @@ log path and commit; a new sighting is added to its row the day it is seen.
   its control. Owed: a rule for which controls are re-fired when (each release, or a period), proposed to the product
   owner.
 * A control for `Job::drop` forgetting its kernel job (6542, item 7).
-* `build_flag_word!`'s word: `FLAGS` is 19 under `personality=user`, and `audit_words` puts what its first word
-  has no room for in the second's bits from 8 (ledger 7224); a const assert that those bits do not run out.
+* Done 2026-11-26 (sebastian-27e): `audit_words`' room is a const assert in `build_flags.rs` (`audit_words_fit`):
+  `FLAGS` (20 under `personality=user`) leaves its two leading places four bits each and every other flag two,
+  sixteen in the first word and twelve from bit 8 of the second, so a fifth value or a thirtieth flag fails the
+  build by name. Was: `build_flag_word!`'s word: `FLAGS` is 19 under `personality=user`, and `audit_words` puts
+  what its first word has no room for in the second's bits from 8 (ledger 7224); a const assert that those bits
+  do not run out.
 * `test-rustc` hung in its warm loop once in about five runs on fault-around
   (mk-perf, 449c63ddc's message), and not in ten since. Not diagnosed (6537 (3)).
 * The window, each a flip precondition (6411, by 6542): a control per path of `replace` and

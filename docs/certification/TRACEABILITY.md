@@ -24,7 +24,7 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Named by a low-level requirement | 3586 |
 | Accessors, covered by the requirement they serve | 1528 |
 | Check code in a product file | 133 |
-| Named by none | 1173 |
+| Named by none | 1174 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 

@@ -228,6 +228,38 @@ const _: () = assert!(
     "a build flag has no value, or more than one: build the kernel through cargo xtask"
 );
 
+/// Whether [`audit_words`] has room for every flag's place: the profile's and the
+/// level's in four bits each, every other flag's in two, sixteen of them in the
+/// first word and the rest from bit 8 of the second, which leaves twelve
+/// (ledger 7224). A flag with a fifth value, or a thirteenth flag past the first
+/// word, would be cut short in the audit record with nothing saying so.
+const fn audit_words_fit(flags: &[Flag]) -> bool {
+    /// Two flags (the profile and the level) lead, outside the two-bit places.
+    const LEADING: usize = 2;
+    /// The two-bit places the first word holds, and the second from bit 8.
+    const PLACES: usize = 32 / 2 + (32 - 8) / 2;
+    if flags.len() > LEADING + PLACES {
+        return false;
+    }
+    let mut index = 0;
+    let mut rest = flags;
+    while let [flag, tail @ ..] = rest {
+        let room = if index < LEADING { 1 << 4 } else { 1 << 2 };
+        if flag.values.len() > room {
+            return false;
+        }
+        index += 1;
+        rest = tail;
+    }
+    true
+}
+
+const _: () = assert!(
+    audit_words_fit(&FLAGS),
+    "the build flags no longer fit the configuration audit record's two words: \
+     audit_words would cut a flag's place short"
+);
+
 /// The value this build was compiled with, and its place in the flag's list.
 const fn chosen(values: &'static [(bool, &'static str)]) -> (&'static str, u32) {
     let mut at = 0;
