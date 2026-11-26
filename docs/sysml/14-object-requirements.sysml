@@ -4169,7 +4169,11 @@ package FerrixObjectRequirements {
                 holds user::address_wait::grow built under heap alone and object::process::fixed_entries under
                 retyped alone, its plants FIRED. The description above the size is refused by check-partitions
                 at build and stops the boot (FX-0980), each control FIRED. user::address_wait_check's
-                compared sequence sees the one bucket as the heap's 256 under both memory models. The seal's own read of the tables is B's line, a BACKLOG row.";
+                compared sequence sees the one bucket as the heap's 256 under both memory models. This case holds K16.9's three ring-0 tables (the pid
+                table, the quota table, the address waits'); its other three globals, devmgr's BINDINGS and
+                DRIVER_ENDINGS and linuxd_start's WATCHED, are named parts of K16.9 owned by B and held by
+                mm::seal::check (capacity at the report equal to capacity at the seal); devmgr's RESERVE is
+                closed apart by L.object.350 (F-128).";
             attribute :>> parent = "H.MEM.33";
             attribute :>> unit = ("object::process::put", "object::process::limit_processes",
                 "object::process::Live::index", "object::process::Live::get", "object::process::Live::get_mut",

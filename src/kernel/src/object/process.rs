@@ -1331,7 +1331,8 @@ fn put(live: &mut Live, number: u32, entry: Entry) -> Result<(), AllocError> {
 
 /// Tasks ring 0's table holds at once under `kernel_memory=retyped`: K16.9's `N_tasks`, a
 /// capacity of the profile (docs/microkernel/K16.md §3). Tonight's heaviest row held at most 63
-/// (the bucket's upper edge, ledger 10548 Z2), so 1024 is sixteen times it.
+/// (the bucket's upper edge, ledger 10548 Z2), so 1024 is sixteen times it. Public for
+/// `mm::seal`, whose frame check bounds the kernel stacks by it (ledger 10639 F5, B's).
 #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
 pub const FIXED_TASKS: usize = 1024;
 
