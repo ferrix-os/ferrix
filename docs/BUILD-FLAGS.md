@@ -206,6 +206,14 @@ file, and an ad hoc command on x86-64 can build it, as this branch's own figures
 
 Not flags, and why:
 
+* **`qemu_cpu`** (a profile's QEMU processor model per architecture; ledger 10312 J3,
+  10626) is test-harness data, not kernel code: it changes no image, only which model a
+  row boots on. `max` names `neoverse-n1` for AArch64, which reads CSV2, because `max`
+  stops on a processor that neither issues its exit barrier nor shows itself unaffected;
+  every other profile names none and boots on xtask's default. An architecture name xtask
+  does not know fails the profile's load. `FERRIX_ARM_CPU_OVERRIDE` is the one way past it,
+  for one lawful use, the stop's own control (a `max` image on a processor without CSV2
+  stopping by name), and the boot's `qemu:` line then says "(override of profile max)".
 * **The architecture** is a build axis, not a flag: every profile builds for
   x86-64, AArch64 and ARMv7-A, and each profile names the architectures its
   claim covers (`max` and `fast`: AArch64 for now, `MICROKERNEL.md` §6.5).

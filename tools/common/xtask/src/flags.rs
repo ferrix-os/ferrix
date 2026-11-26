@@ -283,6 +283,9 @@ pub(crate) struct Profile {
     /// Its image keys (`image = { .. }`), in the file's order: what the
     /// image carries beside the kernel (docs/BUILD-FLAGS.md §3, "Not flags").
     pub(crate) image: Vec<(String, String)>,
+    /// The QEMU processor model its rows boot on, by architecture (`qemu_cpu`),
+    /// where it names one (ledger 10522 (D) 1).
+    pub(crate) qemu_cpu: Vec<(String, String)>,
 }
 
 impl Profile {
@@ -339,6 +342,18 @@ impl Profile {
                 .ok_or_else(|| what(&format!("image key {key} is not a string")))?;
             image.push((key.clone(), value.to_owned()));
         }
+        let mut qemu_cpu = Vec::new();
+        for (arch, model) in root.get("qemu_cpu").map(Value::entries).unwrap_or_default() {
+            if !["x86_64", "aarch64", "armv7a"].contains(&arch.as_str()) {
+                return Err(what(&format!(
+                    "qemu_cpu names `{arch}`, which is no architecture xtask knows"
+                )));
+            }
+            let model = model
+                .as_str()
+                .ok_or_else(|| what(&format!("qemu_cpu's {arch} is not a string")))?;
+            qemu_cpu.push((arch.clone(), model.to_owned()));
+        }
         Ok(Profile {
             name: name.to_owned(),
             level,
@@ -346,6 +361,7 @@ impl Profile {
             values,
             exceptions,
             image,
+            qemu_cpu,
         })
     }
 }
@@ -834,6 +850,20 @@ mod tests {
             .iter()
             .map(|(flag, value)| ((*flag).to_owned(), (*value).to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn max_boots_aarch64_on_a_model_that_reads_csv2_and_fast_on_the_default() {
+        // Ledger 10312 J3, 10522 (D) 1: max's stop is keyed on the processor, so its rows
+        // boot on QEMU's Neoverse N1; every other profile on xtask's default.
+        let max = Profile::load("max").unwrap();
+        assert_eq!(
+            max.qemu_cpu,
+            vec![("aarch64".to_owned(), "neoverse-n1".to_owned())]
+        );
+        for other in ["fast", "present", "desktop"] {
+            assert!(Profile::load(other).unwrap().qemu_cpu.is_empty(), "{other}");
+        }
     }
 
     #[test]

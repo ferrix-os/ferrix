@@ -3498,12 +3498,72 @@ pub(crate) const INTEL_IOMMU_AW48: &str = "intel-iommu,intremap=on,eim=off,aw-bi
 /// keep EL1 out of user pages -- and QEMU exposes no property to add one to
 /// this model the way x86-64's `+smap` adds SMAP to `qemu64`. `FERRIX_ARM_CPU`
 /// swaps the model, which is how `docs/certification/FINDINGS.md` F-32
-/// demonstrates that path on `max` without changing what every Arm test runs
-/// on. ARMv7-A's Cortex-A7 cannot have PAN at all: it is an ARMv8.1 feature.
+/// demonstrates that path on QEMU's own `max` processor model (QEMU's, not the
+/// `max` profile's) without changing what every Arm test runs on: F-32's run sets
+/// `FERRIX_ARM_CPU=max` on a profile that names no model of its own, where the
+/// variable still holds. ARMv7-A's Cortex-A7 cannot have PAN at all: it is an ARMv8.1 feature.
+///
+/// A profile may name its own model (`qemu_cpu` in its file): `max`'s AArch64 rows boot
+/// on the Neoverse N1, which reads CSV2 (ledger 10312 J3, 10522 (D) 1, 10626). The
+/// profile's model wins over `FERRIX_ARM_CPU`, so a row of that profile cannot be moved
+/// off it by hand. One named, loud way past it stays, `FERRIX_ARM_CPU_OVERRIDE`, for one
+/// lawful use: the stop's own control, a `max` image on a processor without CSV2 stopping
+/// by name (10626 C1); the boot's `qemu:` line then says "(override of profile max)". A
+/// profile whose file does not load, or a run whose flags do not resolve, boots on the
+/// default and the line says why (C2).
 pub(crate) fn arm_cpu(arch: Arch) -> String {
-    if let Ok(model) = std::env::var("FERRIX_ARM_CPU") {
-        return model;
+    arm_cpu_and_why(arch).0
+}
+
+/// [`arm_cpu`], and where the model came from, for the boot's `qemu:` line.
+pub(crate) fn arm_cpu_and_why(arch: Arch) -> (String, String) {
+    let profile = match profile_cpu(arch) {
+        Ok(found) => found,
+        Err(why) => return (default_arm_cpu(arch), format!("the default: {why}")),
+    };
+    if let Some((name, model)) = profile {
+        if let Ok(over) = std::env::var("FERRIX_ARM_CPU_OVERRIDE") {
+            return (
+                over,
+                format!("override of profile {name}, which names {model}"),
+            );
+        }
+        return (model, format!("profile {name}"));
     }
+    if let Ok(model) = std::env::var("FERRIX_ARM_CPU") {
+        return (model, "FERRIX_ARM_CPU".to_owned());
+    }
+    (default_arm_cpu(arch), "the default".to_owned())
+}
+
+/// The model this run's profile names for `arch`, if it names one; why it could not be
+/// read, if not.
+fn profile_cpu(arch: Arch) -> std::result::Result<Option<(String, String)>, String> {
+    let resolved = crate::flags::this_run()
+        .map_err(|error| format!("this run's flags did not resolve ({error})"))?;
+    let profile = crate::flags::Profile::load(&resolved.base)
+        .map_err(|error| format!("profile {}'s file did not load ({error})", resolved.base))?;
+    let name = arch.to_string();
+    Ok(profile
+        .qemu_cpu
+        .iter()
+        .find(|(model_arch, _)| *model_arch == name)
+        .map(|(_, model)| (profile.name.clone(), model.clone())))
+}
+
+/// The boot's `qemu:` line: the architecture, the accelerator, the processors, and on Arm
+/// the model and where it came from.
+fn say_machine(arch: Arch, accelerator: &str, processors: u32) {
+    if arch == Arch::X86_64 {
+        println!("  qemu: {arch} under {accelerator}, {processors} processors");
+    } else {
+        let (cpu, why) = arm_cpu_and_why(arch);
+        println!("  qemu: {arch} under {accelerator}, {processors} processors, cpu {cpu} ({why})");
+    }
+}
+
+/// xtask's own model for `arch`.
+fn default_arm_cpu(arch: Arch) -> String {
     if arch == Arch::AArch64 {
         "cortex-a72"
     } else {
@@ -3619,7 +3679,7 @@ fn qemu_command(
     let processors = processors(&accelerator, &binary, args);
     // Every boot names its accelerator, so a log read later says whether
     // the guest was emulated without anybody having to guess.
-    println!("  qemu: {arch} under {accelerator}, {processors} processors");
+    say_machine(arch, &accelerator, processors);
     BOOT_FORM.with(|form| form.set(Some((accelerator == "kvm", processors))));
 
     let mut command = pinned(&binary, args.pin.as_deref(), args.cpu_quota, processors)?;

@@ -24,6 +24,12 @@ level = "none"
 target_level = "sc4"
 claim = "IEC 61508-3 SC 4 / ISO 26262 ASIL D, from M7"
 claim_architectures = ["aarch64"]
+# The QEMU processor model its rows boot on, per architecture (ledger 10312 J3, 10522 (D) 1):
+# `max` stops by name on a processor that neither issues the exit barrier nor shows itself
+# unaffected, and QEMU's default Cortex-A72 has no CSV2 and no firmware workaround, where
+# its Neoverse N1 reads CSV2. The model shows the decision's path, not any hardware's
+# immunity (M7's, on the target). Other profiles boot on xtask's default.
+qemu_cpu = { aarch64 = "neoverse-n1" }
 buildable_from = "M5"
 image = { driver_updates = "absent", settings_writer = "absent", slot_signing = "off", bad_frames = "persist" }
 # The families its loader accepts a slot manifest for (docs/SIGNING.md §1.4, §10.6).
