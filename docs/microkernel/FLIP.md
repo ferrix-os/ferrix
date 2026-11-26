@@ -41,16 +41,16 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | Done (this landing). LV.2: `fast`'s `slot_signing=required`, families `aarch64-uefi-virt` only | Read the rows' boot path; a development-signed slot at level none; x86_64-uefi-pc joins the list if x86-64 boots `fast`, with a check that a family lies inside `claim_architectures` at level != none |
 | LV.3: `flag_nodes` keyed on `ferrix_level` would go dark at level none | Keyed on the profile: done. The certified-list writer and K14.12's framing test: done, development-only, refused above level none (`mkf2k-c-level`). Real nodes by a plant: `mkf2d-k14-pass`, `mkf2d-k14-off` |
 | LV.4: `settings_writer=absent` needs lode reload's writer out (3623 R18) | Done: a build value of `lode`, refused in an `absent` image |
-| LV.5: `test-flags`, `test-kaslr`, `test-netboot` under the profiles; a row's boot options against a profile's permitted set | Read and run each. `check-stack-depth` on `personality=user`, both architectures: it walks a region's process made, a Linux call being linuxd's |
+| LV.5: `test-flags`, `test-kaslr`, `test-netboot` under the profiles; a row's boot options against a profile's permitted set | Read and run each. `check-stack-depth` on `personality=user`, both architectures: done 2026-11-26 (ledger 10274), read under `max`'s values ad hoc; again on the profile in B.8's sweep: a region's process made, 13,240 of 20,480 on x86-64 and 13,840 of 24,576 on AArch64, a lower bound, 4,096 left on each; the OOM emptier 13,288 and 13,872. The walk named a closure's instantiation for `process_create_shared` and left the region's answer, which holds its inlined body, out of the figure (10,664 and 12,160 before); a judged path now names functions themselves, and the region's answer is on it (F-124); a 12 KiB plant there FIRED on both (`n27c-l-c-*`), where the old walk's did not (`n27c-sd-c-*`). `present`'s paths read the same before and after on all three. A Linux call's paths are linuxd's, on its own stack |
 | B.7: `fast_and_max_stay_not_buildable_with_the_lift_in` | The shrinking list is in: done. Owed at the flip commit: a flag-file copy with one value flipped fails it, control FIRED, and rule 3 on raising `level` FIRED; on empty, both profiles build at level none with their targets |
-| B.8: one sweep per profile and architecture on one hash, in this file | Every row PASSED, FAILS with cause and a BACKLOG row, or NOT RUN, never absent |
+| B.8: one sweep per profile and architecture on one hash, in this file | Every row PASSED, FAILS with cause and a BACKLOG row, or NOT RUN, never absent; `check-stack-depth` on x86-64 and AArch64 among them, on the profile's own image (LV.5, ledger 10274 L7) |
 
 ## Every "before the flip" in the tree, sorted
 
 | Where | What | Word |
 |---|---|---|
 | BACKLOG 259 | `restricted_fastpath=on`: Z2-Z4, K1 fast path review, 6093 | `built` of `on` |
-| BACKLOG 339 | check-stack-depth on the user kernel | the profile builds (LV.5) |
+| BACKLOG 339 | check-stack-depth on the user kernel | the profile builds (LV.5): done 2026-11-26, both architectures, read ad hoc (ledger 10274) |
 | BACKLOG 343, 344 | `KERNEL_JOBS`, `DEBUG_WRITE` | M5's flip |
 | BACKLOG 415 | K14's certified list has no writer | the profile builds (LV.3) |
 | BACKLOG 423 | netd's network row, N.7 | netd entering a profile, M5's flip |

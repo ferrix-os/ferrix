@@ -68,7 +68,15 @@ LINUX = ["ferrix_kernel_item::syscall::dispatch_with", "syscall::linux::answer_a
 LINUX_SUBTREE = "process::Process>::new"
 # A kernel with no load in it (`personality=user`, FLIP.md LV.5): no Linux call runs on a kernel
 # stack there, as `linuxd`'s are its own, so its deepest named call is a region's process made.
-USER_NATIVE = COMMON + ["syscall::native::region::process_create_shared"]
+# The region's answer holds `process_create_shared` where it is inlined, as in the development
+# image; where it is a function of its own it is counted too (the `?`). Named by the walk before
+# 2026-11-26 as `process_create_shared` alone, which matched only a closure's instantiation
+# (`Process::with_handles::<.., process_create_shared::{closure#3}>`), so the region's answer and
+# the inlined body were in no figure (FLIP.md LV.5, ledger 10274, F-124).
+USER_NATIVE = COMMON + [
+    "syscall::native::region::answer",
+    "syscall::native::region::process_create_shared?",
+]
 USER_SUBTREE = "ferrix_kernel_core::object::process::Process>::new"
 # What this row asks to be left on each architecture's stack, for what a lower bound leaves out
 # (ledger 7033 D2 for AArch64; x86-64 and ARMv7-A the same since their walks are judged, F-110).
@@ -473,13 +481,49 @@ def read_frames(text, slots=None):
     return frames, {name: sorted(callees) for name, callees in calls.items()}, unresolved, unfollowed
 
 
-def named(frames, part, problems):
-    """The shortest name holding `part`, the first by name among those as short, or a problem said."""
-    found = [name for name in frames if part in name]
-    if not found:
-        problems.append(f"no function holds `{part}`: the path was renamed, walk it again")
+def itself(name, part):
+    """Whether `name` is the function `part` names, not a closure of it or an instantiation of
+    another function that takes it as a type argument: `part` ends the name, or is followed by
+    its own generic arguments or Rust's hash."""
+    at = name.rfind(part)
+    if at < 0:
+        return False
+    rest = name[at + len(part):]
+    if rest.startswith("::<"):
+        # Its own generic arguments, brackets balanced, and nothing after them but the hash
+        # (ledger 10274 L1): `f::<T>::{closure#0}` and `f::<T>::inner` are not `f`.
+        depth = 0
+        for index, char in enumerate(rest[2:], start=2):
+            depth += (char == "<") - (char == ">")
+            if depth == 0:
+                rest = rest[index + 1:]
+                break
+        else:
+            return False
+    return rest == "" or re.fullmatch(r"::h[0-9a-f]{16}", rest) is not None
+
+
+def named_on_path(frames, part, problems):
+    """A judged path's function: the shortest name that is `part` itself (`itself`). A part ending
+    in `?` may be inlined into the one before it, and is then None, with no problem. A part that
+    only a closure or another function's instantiation holds is a problem: its body is inlined, and
+    the path must name the function that holds it, or its frame is in no figure."""
+    optional = part.endswith("?")
+    part = part.rstrip("?")
+    whole = [name for name in frames if itself(name, part)]
+    if whole:
+        return min(whole, key=lambda name: (len(name), name))
+    if optional:
         return None
-    return min(found, key=lambda name: (len(name), name))
+    held = sorted((name for name in frames if part in name), key=lambda name: (len(name), name))
+    if held:
+        problems.append(
+            f"only a closure or another function's instantiation holds `{part}` ({held[0][:120]}): "
+            "it is inlined into its caller, so name the caller on the path"
+        )
+    else:
+        problems.append(f"no function holds `{part}`: the path was renamed, walk it again")
+    return None
 
 
 class CycleTooLarge(Exception):
@@ -730,11 +774,13 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
         way_in.append(frame["first"])
     else:
         ways = [frame["first"], f"ferrix_kernel_core::arch::{arch}::trap::system_call"]
+        # Text, not a frame: which of the two names this image holds at all; each is then named
+        # as a function below (`named_on_path`).
         found = [way for way in ways if any(way in name for name in frames)]
         way_in += found or ways
         way_in.append("ferrix_kernel_core::trap::system_call")
-    timer = named(frames, TIMER, problems)
-    above = next((n for n in sorted(frames) if TIMER_ABOVE in n), None)
+    timer = named_on_path(frames, TIMER, problems)
+    above = named_on_path(frames, TIMER_ABOVE + "?", [])
     rest = drop_rest(frames, calls, problems)
     lines.append(f"stack-depth: {arch}: what a task's last drop leaves, under an interrupt: {rest}{remark}")
     kill = empties_nothing(frames, calls, problems)
@@ -772,8 +818,17 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
         deep_timer = None
         for label, chain, subtree in paths:
             missing = []
-            names = [named(frames, part, missing) for part in chain]
-            below = named(frames, subtree, missing)
+            names = []
+            for part in chain:
+                name = named_on_path(frames, part, missing)
+                if name:
+                    names.append(name)
+                elif part.endswith("?") and names:
+                    lines.append(
+                        f"stack-depth: {arch}: {label}: `{part.rstrip('?').rsplit('::', 1)[-1]}` is inlined, "
+                        f"counted in `{names[-1].rsplit('::', 1)[-1]}`"
+                    )
+            below = named_on_path(frames, subtree, missing)
             if missing or timer is None:
                 return lines, problems + missing
             if deep_timer is None:
@@ -793,9 +848,10 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
                     f"{arch}: {label} under a timer's interrupt reaches {worst} of {stack_bytes} bytes, {floor} to be left"
                 )
         # All of what direct calls reach below `sys_clone`, as possible, but what `CLONE_CANNOT` says.
-        clone = None if user else named(frames, "family::sys_clone", problems)
+        clone = None if user else named_on_path(frames, "family::sys_clone", problems)
         if clone:
-            chain = sum(frames[named(frames, part, problems)] + each for part in way_in + LINUX[:-1])
+            parts = [named_on_path(frames, part, problems) for part in way_in + LINUX[:-1]]
+            chain = sum(frames[name] + each for name in parts if name)
             below = clone_walk.depth(clone)
             worst = frame["entry"] + chain + below + frame["interrupt"] + deep_timer
             lines.append(
@@ -810,7 +866,7 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
         # The way out of a system call: a signal's frame, or a thread's end with its process
         # released and its space unmapped, under the way in and a timer's interrupt.
         if not user and EXIT in frames:
-            ways = [named(frames, part, problems) for part in way_in]
+            ways = [named_on_path(frames, part, problems) for part in way_in]
             total = frame["entry"] + sum(frames[name] + each for name in ways if name)
             depth = plain.depth(EXIT)
             worst = total + depth + frame["interrupt"] + deep_timer
@@ -855,7 +911,7 @@ def judge(frames, calls, arch, stack_bytes, unresolved=0, show_chains=False, unf
                 problems.append(f"{arch}: an overflow's last line reaches {depth} of its stack's {STOP_STACK} bytes")
         # Every recursion a judged line reaches: named, and refused unless listed (RECURSIONS).
         roots = [
-            (plain, below_name) for below_name in (named(frames, sub, []) for _, _, sub in paths) if below_name
+            (plain, below_name) for below_name in (named_on_path(frames, sub, []) for _, _, sub in paths) if below_name
         ]
         roots += [(clone_walk, clone)] if clone else []
         roots += [(under_irq, name) for name in (timer, above) if name]
@@ -1066,7 +1122,25 @@ def self_test():
     )
     assert all(len(each) == 5 and (each[3] is None) != (each[4] is None) for each in RECURSIONS), "a bound or an owner"
     problems = []
-    assert named(frames, "nothing", problems) is None and problems
+    assert named_on_path(frames, "nothing", problems) is None and problems
+    # A judged path's function is the function itself (ledger 10274, F-124): a closure's instantiation
+    # does not stand for it, an optional part inlined is skipped, an instantiation of its own counts.
+    held = {
+        "<k::object::process::Process>::with_handles::<r, k::syscall::native::region::process_create_shared::{closure#3}>": 64,
+        "k::syscall::native::region::answer": 4096,
+        "k::exec::make_native_in::<k::A>": 32,
+    }
+    found = []
+    assert named_on_path(held, "syscall::native::region::process_create_shared", found) is None
+    assert found and "only a closure" in found[0], found
+    found = []
+    assert named_on_path(held, "syscall::native::region::process_create_shared?", found) is None and not found
+    assert named_on_path(held, "syscall::native::region::answer", found) == "k::syscall::native::region::answer"
+    assert named_on_path(held, "exec::make_native_in", found) == "k::exec::make_native_in::<k::A>" and not found
+    # L1: after its own generic arguments, nothing but the hash.
+    assert itself("k::f::<k::A<u8>>", "k::f") and itself("k::f::<k::A>::h0123456789abcdef", "k::f")
+    assert not itself("k::f::<k::A>::{closure#0}", "k::f") and not itself("k::f::<k::A>::inner", "k::f")
+    assert not itself("k::f::<k::A", "k::f")
     # The way out and the emptier fail closed in an image with the syscall layer (ledger 9096 H1).
     load = {"ferrix_kernel_load::x": 8, EXIT: 8, EMPTIER: 8}
     problems = []
