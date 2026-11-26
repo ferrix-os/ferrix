@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "81f6f3454f7f679cfd842e84cc4154b87522c634d79efdc564e749b1bccf013e",
+  "digest": "f8f48072f98fbb3988dcf06059df59fb3dc6d413c3f3e4662148346fcfdaec30",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 168,
-    "elements": 10490,
+    "elements": 10495,
     "maturity": {
       "implemented": 296,
       "inProgress": 23,
@@ -58581,6 +58581,63 @@
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
                     "line": 1582
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aRefusedAttachGivesNoDomainUnderK14",
+              "qualifiedName": "FerrixIommuRequirements::AmdVi::aRefusedAttachGivesNoDomainUnderK14",
+              "kind": "requirement",
+              "shortName": "L.iommu.110",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 1584
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aRefusedAttachGivesNoDomainUnderK14",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"In a kernel that holds nodes to K14's grant (fast, max, or a certified level), a function whose unit refuses its attachment shall get no domain, so nothing of it is pinned, never an untranslated one, and the refusal is said by name; in any other kernel it gets an untranslated one.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1588
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aRefusedAttachGivesNoDomainUnderK14",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A user kernel's boot check (iommu::check::check_attach_refused) fails the first allocation of an attachment to the first function a unit would translate and no domain is made for, and requires that nothing is left attached: under fast no domain, under --personality user alone an untranslated one; a boot of fast must print that line. With the untranslated answer given under fast too, the boot stops naming a refused attachment that gave a domain (n27e-kc2-held-a64); with no domain given outside a held kernel, it stops naming that (n27e-kc2-open-x86).\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1596
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aRefusedAttachGivesNoDomainUnderK14",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DMA.3\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1597
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::AmdVi::aRefusedAttachGivesNoDomainUnderK14",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"iommu::domain_placed\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 1598
                   }
                 }
               ]

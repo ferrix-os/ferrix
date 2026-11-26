@@ -846,6 +846,15 @@ impl Unit {
         })
     }
 
+    /// Whether `function`'s context entry is present: an attachment holds it.
+    pub(crate) fn holds(&self, function: Address) -> bool {
+        let tables = self.tables.lock();
+        tables
+            .contexts
+            .get(&function.bus())
+            .is_some_and(|&context| read_entry(context + devfn(function) * 16) & PRESENT != 0)
+    }
+
     /// Give `function` a domain of its own on this unit: an empty second-level
     /// tree its context entry points at.
     ///

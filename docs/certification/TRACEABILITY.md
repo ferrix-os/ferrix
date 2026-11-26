@@ -15,7 +15,7 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 196 | 141 | 55 |
-| Low (`L.*`) | 1555 | 1275 | 280 |
+| Low (`L.*`) | 1556 | 1276 | 280 |
 
 3577 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
@@ -23,7 +23,7 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 |---|---:|
 | Named by a low-level requirement | 3586 |
 | Accessors, covered by the requirement they serve | 1528 |
-| Check code in a product file | 131 |
+| Check code in a product file | 133 |
 | Named by none | 1173 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
@@ -74,6 +74,8 @@ Functions that are checks, or serve only checks, and live in a product file, so 
 | `iommu::record_provoked_interrupt` | Serves only checks R1 to R3, through Domain::provoke_interrupt: it records the stream and reason a check provokes and says so. It needs PROVOKED_INTERRUPTS, private to iommu.rs, which provoked() reads. |
 | `iommu::remapping::close_check_window` | Serves only checks R1 and R2: it closes open_check_window's window. Beside it for the same reason. |
 | `iommu::remapping::open_check_window` | Serves only checks R1 and R2 (device/check.rs): it opens the window inside which a delivery of the check vector 0xFC is the check's, not stray. It needs the window's statics, private to iommu/remapping.rs, which the vector's handler reads. |
+| `iommu::smmuv3::Unit::holds` | Serves only L.iommu.110's check (iommu/check.rs::check_attach_refused): whether a stream's entry translates after a refused attachment, so that the check shows nothing was left attached. It reads the stream table through the unit's private read_entry and STE_S2_TRANSLATE. |
+| `iommu::vtd::Unit::holds` | Serves only L.iommu.110's check (iommu/check.rs::check_attach_refused): whether a function's context entry is present after a refused attachment, so that the check shows nothing was left attached. It reads the unit's private context tables under their lock. |
 | `iommu::vtd::Unit::link_empty_table` | The unit's half of Domain::link_empty_table: the walk chosen and the writes published, for stage 10's fallback case (L.iommu.107). Nothing in product code calls it. |
 | `iommu::vtd::check_planted_completion_error` | Serves only the stage 10 check of a completion error (iommu/check.rs check_completion_errors, L.iommu.48): it plants ICE in the unit's software mirror of FSTS and drives two invalidations through it. It needs the unit's mirror and counters, private to vtd.rs, so it stays beside them. |
 | `iommu::vtd::leave_queue_on_and_stop` | Serves only the stage 10 check of a queue firmware left on (iommu/check.rs check_firmware_left_on, L.iommu.51): it puts a unit's queue in the state such firmware leaves it in, then calls the product path stop_firmware. It needs the unit's registers and frames, private to vtd.rs, so it stays beside them. |
@@ -1229,6 +1231,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.iommu.107` | Where a run's 2 MiB slot holds a table, Domain::pin shall map the run's pages one by one and refuse the pin only for a page refused there; where it holds a 2 MiB entry, it shall refuse the pin with AlreadyPinned, nothing of that run mapped; a 4 KiB map that meets a 2 MiB entry shall refuse the pin with AlreadyPinned; and the unwind shall take out only what this pin mapped, a run whole only where its 2 MiB entry was written or all 512 of its pages were mapped, else page by page. | Stage 10's run check: with an empty leaf table left in a window's slot by a checks-only helper, a pin of the window's run maps all 512 pages at 4 KiB, each reaching its frame; with one page of a window pinned, a pin of the window's run is AlreadyPinned, none of its other pages resolves, the pinned count is unchanged and the one page is still mapped at 4 KiB; with the window's run pinned as a block, a second pin of the run and a pin of one page in it are each AlreadyPinned and every page of the block is still a 2 MiB entry reaching its frame. | H.DMA.3, H.DMA.8 | `iommu::map_all`, `iommu::unwind`, `iommu::vtd::Unit::entry_span`, `mm::io_entry_span` | `src/kernel/src/iommu/blocks_check.rs::check_runs` | not built | not built | not built |
 | `L.iommu.108` | An unpin of a VT-d domain's pin, and the unwind of L.iommu.107, shall take each run of the pin's addresses down as one 2 MiB range, whether it was mapped as one entry or as 512 pages, and every other page by itself; after an unpin no page of the pin shall resolve and the tables it emptied shall be given back, after the unit's flush as F-36's rule and L.iommu.21 hold for every unpin. | Stage 10's run check: after the unpin of each pin of the cases of L.iommu.106 and L.iommu.107 no page of it resolves and the free frame count is what it was before the pin; a pin of a run and a page another pin holds is AlreadyPinned with no page of the run resolving after its unwind. | H.DMA.3, H.DMA.8 | `iommu::take_down`, `iommu::Translation::vtd`, `iommu::Domain::unpin_waiting`, `iommu::unwind`, `iommu::vtd::Unit::unmap_run`, `mm::unmap_io_run` | `src/kernel/src/iommu/blocks_check.rs::check_runs` | not built | not built | not built |
 | `L.iommu.109` | ferrix_paging::vtd::queue::iotlb shall build only global and domain-selective IOTLB invalidations, and it shall be the only IOTLB invalidation the item submits, so no flush misses a 2 MiB entry. | Host test no_iotlb_invalidation_is_page_selective: over every scope there is, by an exhaustive match, and both drains, the granularity field is never page-selective and the address quadword is 0. The only path by argument: a unit without ECAP.QI is refused (L.iommu.47) and Unit::invalidate_iotlb submits queue::iotlb alone. | H.DMA.3, H.DMA.8 | `iommu::vtd::Unit::flush`, `iommu::vtd::Unit::invalidate_iotlb` | `src/lib/kernel/paging/src/vtd/tests.rs::no_iotlb_invalidation_is_page_selective` | host test | host test | host test |
+| `L.iommu.110` | In a kernel that holds nodes to K14's grant (fast, max, or a certified level), a function whose unit refuses its attachment shall get no domain, so nothing of it is pinned, never an untranslated one, and the refusal is said by name; in any other kernel it gets an untranslated one. | A user kernel's boot check (iommu::check::check_attach_refused) fails the first allocation of an attachment to the first function a unit would translate and no domain is made for, and requires that nothing is left attached: under fast no domain, under --personality user alone an untranslated one; a boot of fast must print that line. With the untranslated answer given under fast too, the boot stops naming a refused attachment that gave a domain (n27e-kc2-held-a64); with no domain given outside a held kernel, it stops naming that (n27e-kc2-open-x86). | H.DMA.3 | `iommu::domain_placed` | `src/kernel/src/iommu/check.rs::check_attach_refused` | not reached | not reached | not reached |
 
 ### MemoryManagement
 
@@ -2912,6 +2915,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/iommu/amdvi_check.rs::check_edu` | kernel | L.iommu.84, L.iommu.88, L.iommu.94 |
 | `src/kernel/src/iommu/amdvi_check.rs::check_tables` | kernel | L.iommu.84, L.iommu.86, L.iommu.87, L.iommu.96 |
 | `src/kernel/src/iommu/blocks_check.rs::check_runs` | kernel | L.iommu.106, L.iommu.107, L.iommu.108, H.DMA.3 |
+| `src/kernel/src/iommu/check.rs::check_attach_refused` | kernel | L.iommu.110 |
 | `src/kernel/src/iommu/check.rs::check_dma_faults` | kernel | H.DMA.6 |
 | `src/kernel/src/iommu/check.rs::check_fault_events_masked` | kernel | L.iommu.70 |
 | `src/kernel/src/iommu/check.rs::check_firmware_left_on` | kernel | L.iommu.51 |

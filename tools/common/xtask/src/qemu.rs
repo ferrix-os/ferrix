@@ -875,6 +875,13 @@ fn user_boot_problem(lines: &[String], flags: Option<&crate::flags::Resolved>) -
     if let Some(problem) = regions_problem(lines, value) {
         return Some(problem);
     }
+    let held = flags.is_some_and(|flags| {
+        matches!(flags.profile.as_str(), "fast" | "max")
+            || matches!(flags.level.as_str(), "sc2" | "sc4")
+    });
+    if let Some(problem) = k14_problem(lines, held) {
+        return Some(problem);
+    }
     USER_BOOT_LINES.iter().find_map(|(flag, text)| {
         let wanted = flag.is_none_or(|(name, value)| {
             flags.is_some_and(|flags| flags.value(name) == Some(value))
@@ -882,6 +889,19 @@ fn user_boot_problem(lines: &[String], flags: Option<&crate::flags::Resolved>) -
         (wanted && !lines.iter().any(|line| line.contains(text)))
             .then(|| format!("a user kernel's boot never printed `{text}`"))
     })
+}
+
+/// K14 at no memory (L.iommu.110, ledger 10291 K7): a kernel held to K14's grant
+/// must print that its refused attachment gave no domain; its "nothing refused"
+/// line, or none, is a boot that showed nothing.
+fn k14_problem(lines: &[String], held: bool) -> Option<String> {
+    const SAID: &str = "  iommu    K14 at no memory: ";
+    const NO_DOMAIN: &str = "refused attachment gave no domain";
+    (held
+        && !lines
+            .iter()
+            .any(|line| line.contains(SAID) && line.contains(NO_DOMAIN)))
+    .then(|| format!("a boot held to K14's grant never printed `{SAID}... {NO_DOMAIN}`"))
 }
 
 /// What stage 10's IOMMU check prints when every VT-d invalidation of the
@@ -5927,6 +5947,19 @@ mod tests {
     /// Ledger 7184 Q.1: a line reworded in the source leaves a table's literal stale, and a
     /// built check would then read NOT RUN. Each literal is found in a program's source, its
     /// continuations joined; one that is not fails here, named.
+    #[test]
+    fn a_held_boot_must_say_its_refused_attachment_gave_no_domain() {
+        let said = |text: &str| vec![format!("   4.98 |   iommu    K14 at no memory: {text}")];
+        let none = said("pci 0000:00:00.0's refused attachment gave no domain and left nothing");
+        let open = said("pci 0000:00:00.0's refused attachment gave an untranslated domain");
+        let nothing = said("no function a unit would translate, nothing refused");
+        assert_eq!(super::k14_problem(&none, true), None);
+        assert!(super::k14_problem(&open, true).is_some());
+        assert!(super::k14_problem(&nothing, true).is_some());
+        assert!(super::k14_problem(&[], true).is_some());
+        assert_eq!(super::k14_problem(&[], false), None);
+    }
+
     #[test]
     fn every_literal_of_the_user_tables_is_in_the_source_that_prints_it() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../src");

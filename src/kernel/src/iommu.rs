@@ -2338,7 +2338,9 @@ pub fn directly_below_root_port(function: Address) -> bool {
 /// does not place the function behind that unit as its own requester
 /// (`ferrix_pci::topology::agrees`): never an untranslated one, whose first
 /// pin would say its DMA reaches all of memory while the unit confines it
-/// (`L.iommu.78`). Every other function gets `Some`.
+/// (`L.iommu.78`). And `None` for a function whose unit refused its attachment
+/// in a kernel [`HELD_TO_K14`] (`L.iommu.110`). Every other function gets
+/// `Some`.
 pub fn domain_for(function: Address) -> Option<Domain> {
     let Some(programmed) = PROGRAMMED.get() else {
         return Some(Domain::untranslated());
@@ -2381,16 +2383,30 @@ pub fn domain_for(function: Address) -> Option<Domain> {
         }
         return domain;
     }
-    Some(domain_placed(programmed, function))
+    domain_placed(programmed, function)
 }
 
-/// [`domain_for`] for a function no RMRR gave an identity domain.
-fn domain_placed(programmed: &'static Programmed, function: Address) -> Domain {
+/// Whether this kernel holds to K14's grant the nodes nothing would translate:
+/// `fast` and `max` from now, at level none until M7 too, and any profile at a
+/// certified level; `boot_authority::flag_nodes` reads it. Such a kernel gives a
+/// function whose unit refused its attachment no domain rather than an
+/// untranslated one, since the node was judged translated before the attachment
+/// failed, and is not held (ledger 7166 F.3, L.iommu.110).
+pub const HELD_TO_K14: bool = cfg!(any(
+    ferrix_level = "sc2",
+    ferrix_level = "sc4",
+    ferrix_profile = "fast",
+    ferrix_profile = "max",
+));
+
+/// [`domain_for`] for a function no RMRR gave an identity domain: `None` only
+/// when its unit refused the attachment under [`HELD_TO_K14`].
+fn domain_placed(programmed: &'static Programmed, function: Address) -> Option<Domain> {
     let translation = if let Some(unit) = vtd_unit_for(programmed, function) {
         // A unit an RMRR holds to remapping only: its functions' DMA is
         // untranslated, and the first pin announces degraded trusted mode.
         if !unit.translating() {
-            return Domain::untranslated();
+            return Some(Domain::untranslated());
         }
         unit.attach(function).map(|attached| Translation::VtD {
             unit,
@@ -2407,7 +2423,7 @@ fn domain_placed(programmed: &'static Programmed, function: Address) -> Domain {
     } else if let Some(unit) = amdvi_unit_for(programmed, function) {
         // A unit an IVMD holds to remapping only: untranslated, as VT-d's.
         if !unit.translating() {
-            return Domain::untranslated();
+            return Some(Domain::untranslated());
         }
         unit.attach(function).map(|attached| Translation::AmdVi {
             unit,
@@ -2416,13 +2432,13 @@ fn domain_placed(programmed: &'static Programmed, function: Address) -> Domain {
             identity: None,
         })
     } else {
-        return Domain::untranslated();
+        return Some(Domain::untranslated());
     };
     match translation {
-        Ok(translation) => Domain::with(translation),
+        Ok(translation) => Some(Domain::with(translation)),
         Err(why) => {
             println!("  iommu    pci {function} gets no translated domain: {why}");
-            Domain::untranslated()
+            (!HELD_TO_K14).then(Domain::untranslated)
         }
     }
 }

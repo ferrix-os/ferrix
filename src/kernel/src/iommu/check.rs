@@ -227,3 +227,108 @@ pub(crate) fn require_masked_byte_served() {
 #[doc(hidden)]
 pub static MASKED_BYTE_SERVED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
+
+/// [`check_attach_refused`] where the boot's checks run, its line said, or the
+/// boot stopped on its problem.
+pub fn require_attach_refused(nodes: &[alloc::sync::Arc<crate::device::DeviceNode>]) {
+    if !crate::boot_checks::run() {
+        return;
+    }
+    match check_attach_refused(nodes) {
+        Ok(Some(line)) => println!("{line}"),
+        Ok(None) => println!(
+            "  iommu    K14 at no memory: no function a unit would translate, nothing refused"
+        ),
+        Err(problem) => fatal!(
+            catalog::STAGE10_IOMMU,
+            "stage 10 self-check failed: {problem}"
+        ),
+    }
+}
+
+/// Whether the unit `function` is placed behind holds an attachment for it.
+fn unit_holds(programmed: &'static super::Programmed, function: super::Address) -> bool {
+    if let Some(unit) = super::vtd_unit_for(programmed, function) {
+        return unit.holds(function);
+    }
+    if let Some((unit, stream)) = super::smmu_stream_for(programmed, function) {
+        return unit.holds(stream);
+    }
+    super::amdvi_unit_for(programmed, function).is_some_and(|unit| {
+        ferrix_paging::amdvi::table::dma_half(&unit.device_entry(function.requester_id()))
+            != unit.blocked_dma()
+    })
+}
+
+/// K14 at no memory (ledger 7166 F.3): a function judged translated, whose unit
+/// then refuses its attachment for want of memory, gets no domain in a kernel
+/// [`super::HELD_TO_K14`], and an untranslated one only in a kernel that is not.
+/// The refusal is made, not waited for: the first allocation of this task's,
+/// frames counted, fails once, on the first function no domain is made for yet
+/// that a unit would translate. The refusal must leave nothing: no domain made
+/// for the node and no attachment in its unit, so the driver's own start later
+/// attaches it as ever. `Ok(None)` when no unit translates any function, which
+/// is said in the line; in a held kernel a function a unit would translate and
+/// no candidate found fails.
+///
+/// # Errors
+///
+/// What did not hold, as a sentence.
+///
+/// Verifies: L.iommu.110
+fn check_attach_refused(
+    nodes: &[alloc::sync::Arc<crate::device::DeviceNode>],
+) -> Result<Option<alloc::string::String>, &'static str> {
+    use crate::device::Location;
+    let Some(programmed) = super::PROGRAMMED.get() else {
+        return Ok(None);
+    };
+    let translated = |node: &crate::device::DeviceNode| match node.location() {
+        Location::Pci(function) if super::would_translate(function) => Some(function),
+        _ => None,
+    };
+    let Some((node, function)) = nodes.iter().find_map(|node| {
+        translated(node)
+            .filter(|&function| {
+                node.domain_made().is_none()
+                    && programmed.identity_of(function).is_none()
+                    && !super::ivrs::is_exempt(function)
+            })
+            .map(|function| (node, function))
+    }) else {
+        if super::HELD_TO_K14 && nodes.iter().any(|node| translated(node).is_some()) {
+            return Err(
+                "K14 at no memory: a held kernel found no function to refuse an attachment to",
+            );
+        }
+        return Ok(None);
+    };
+    let Some(me) = crate::sched::current_id() else {
+        return Err("K14 at no memory: the check runs on no task");
+    };
+    crate::fallible::inject_once(me, 1, true);
+    let domain = super::domain_placed(programmed, function);
+    let failed = crate::fallible::stop_injecting();
+    if failed == 0 {
+        return Err(
+            "K14 at no memory: the attachment allocated nothing the injection could refuse",
+        );
+    }
+    if node.domain_made().is_some() || unit_holds(programmed, function) {
+        return Err("K14 at no memory: a refused attachment left the function attached");
+    }
+    match (super::HELD_TO_K14, domain) {
+        (true, None) => Ok(Some(alloc::format!(
+            "  iommu    K14 at no memory: pci {function}'s refused attachment gave no domain and left \
+             nothing attached, as a profile held to K14's grant must"
+        ))),
+        (false, Some(domain)) if !domain.translated() => Ok(Some(alloc::format!(
+            "  iommu    K14 at no memory: pci {function}'s refused attachment gave an \
+             untranslated domain and left nothing attached, in a profile K14 does not hold"
+        ))),
+        (true, Some(_)) => Err(
+            "K14 at no memory: a refused attachment gave a domain in a profile held to K14's grant",
+        ),
+        (false, _) => Err("K14 at no memory: a refused attachment gave no untranslated domain"),
+    }
+}

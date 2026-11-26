@@ -37,7 +37,7 @@ specific, measured, and mostly documents rather than code.
 * [CLAIM.md](CLAIM.md) — **PROPOSED, not decided**: what "Linux software on a kernel that can be assured" can mean, the first standard, freedom from interference for the ring-0 load, and the milestones; the customer's two decisions are open
 * [SAFETY-MANUAL.md](SAFETY-MANUAL.md) — the out-of-context argument: assumed requirements, safe state, eleven assumptions of use, element failure analysis
 * [ITEM.md](ITEM.md) — what the ratings attach to, and why it is not all of Ferrix
-* [FINDINGS.md](FINDINGS.md) — the audit register, 37 open findings and 87 closed, of 124
+* [FINDINGS.md](FINDINGS.md) — the audit register, 37 open findings and 88 closed, of 125
 * [OBJECTIVES.md](OBJECTIVES.md) — DO-178C's Annex A tables for `max` at level A's objectives: a skeleton, no row read from the standard's text yet
 * [AUDIT.md](AUDIT.md) — the security audit of the TSF's own decisions, built and claimed (F-21b)
 * [SECURITY-TARGET.md](SECURITY-TARGET.md) — EAL5+ claim, SFRs, and where it would fail evaluation

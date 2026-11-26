@@ -402,6 +402,12 @@ impl Unit {
         })
     }
 
+    /// Whether `stream`'s entry translates: an attachment holds it.
+    pub(crate) fn holds(&self, stream: u32) -> bool {
+        stream >> STREAM_BITS == 0
+            && read_entry(self.table + u64::from(stream) * STE_BYTES) & STE_S2_TRANSLATE != 0
+    }
+
     /// Give `stream` a domain of its own: an empty stage-2 tree with the MSI
     /// doorbell mapped, which its table entry points at.
     ///

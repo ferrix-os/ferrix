@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3119 declarations in the core's files, 215 in the item's; 279 checks-only.
+3121 declarations in the core's files, 215 in the item's; 279 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1848,6 +1848,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `HELD_TO_K14` | const | item |  |
 | `Cause` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DomainError` | enum | item, load |  |
 | `Wait` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
@@ -1939,6 +1940,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `check_dma_faults` | fn | bin |  |
+| `require_attach_refused` | fn | bin |  |
 | `run` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `FIRMWARE_QUEUES_STOPPED` | static | load (checks) | checks-only |
 | `MASKED_BYTE_SERVED` | static | load (checks) | checks-only |

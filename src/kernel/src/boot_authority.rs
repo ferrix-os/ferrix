@@ -614,12 +614,7 @@ fn read_certified_list() {
 /// from now, at level none until M7 too; another profile flags none, whatever
 /// `ferrix.unisolated` says.
 fn flag_nodes() {
-    if !cfg!(any(
-        ferrix_level = "sc2",
-        ferrix_level = "sc4",
-        ferrix_profile = "fast",
-        ferrix_profile = "max",
-    )) {
+    if !crate::iommu::HELD_TO_K14 {
         return;
     }
     let mut flagged = 0_usize;

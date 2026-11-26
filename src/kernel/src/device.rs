@@ -1329,7 +1329,10 @@ pub enum BindRefusal {
     /// `ferrix.unisolated`.
     Untranslated,
     /// The only domain the function can have is held already (an RMRR
-    /// identity domain).
+    /// identity domain); and, until `iommu::domain_for` carries its reason, a
+    /// function whose unit refused its attachment in a kernel held to K14's grant
+    /// (L.iommu.110), which devmgr treats as it treats `NoMemory`: not bound, the
+    /// driver not started, said on its line.
     Held,
     /// No memory for the domain.
     NoMemory,

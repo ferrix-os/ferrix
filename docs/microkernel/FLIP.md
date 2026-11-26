@@ -73,7 +73,7 @@ M5's flip and M7 keep all of theirs: nothing here is dropped by being moved off 
 
 ## K14 at no memory (ledger 7166 F.3)
 
-`flag_nodes` runs first, so a later `attach` failure gives `Domain::untranslated` with no flag, on all three units: K14 fails open at no memory. M5's flip: under `fast` and `max`, no domain rather than untranslated.
+`flag_nodes` runs first, so a later `attach` failure gives `Domain::untranslated` with no flag, on all three units: K14 fails open at no memory. Done 2026-11-26 (sebastian-27e, L.iommu.110): under `fast` and `max`, and at a certified level, a refused attachment gives no domain (`iommu::domain_placed`), and any other kernel keeps the untranslated one. A user kernel's boot check makes the refusal (the attachment's first allocation failed once) and requires each answer: under `fast` on AArch64 TCG, that the refused attachment gave no domain; under `--personality user`, the untranslated domain. `flag_nodes` reads the same `iommu::HELD_TO_K14`, so what K14 holds is one list; the check requires nothing left attached in the unit, and a boot of `fast` must print its line (F-125, ledger 10291).
 
 ## `test-boot` is `test-flags` here
 

@@ -10,7 +10,7 @@ The statements in the certified item that the measured suite did not reach, on e
 |---|---|---:|---:|---:|---:|
 | x86_64 | coverage | 1907 | 395 | 271 | **1241** |
 | aarch64 | debug | 627 | 308 | 157 | **162** |
-| armv7a | debug | 970 | 409 | 346 | **215** |
+| armv7a | debug | 969 | 409 | 345 | **215** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -252,12 +252,12 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `iommu.rs` | 2288 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
 | `iommu.rs` | 2290 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
 | `iommu.rs` | 2292 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 2401-2402 | Unreachable on the measured architecture | The SMMUv3 branch, for the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 2572-2575 | Unreachable on the measured architecture | The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 2579 | Unreachable on the measured architecture | The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
-| `iommu.rs` | 2689 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
-| `iommu.rs` | 2825 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
-| `iommu.rs` | 2827 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
+| `iommu.rs` | 2417-2418 | Unreachable on the measured architecture | The SMMUv3 branch, for the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 2588-2591 | Unreachable on the measured architecture | The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 2595 | Unreachable on the measured architecture | The stream an SMMUv3 sees, from the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
+| `iommu.rs` | 2705 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
+| `iommu.rs` | 2841 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
+| `iommu.rs` | 2843 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
 | `main.rs` | 296 | Reached only when the kernel is stopping | The failure arm in `kmain`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `INTERRUPT_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 443 | Reached only when the kernel is stopping | The failure arm in `check_timer_and_start_clocks`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE3_TIMER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 610 | Reached only when the kernel is stopping | The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_ROOT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
@@ -608,18 +608,18 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `iommu.rs` | 2273 | Reached only when something has already failed | An SMMUv3 the IORT describes that would not open or enable: left alone, its functions untranslated. QEMU's unit always enables. |
 | `iommu.rs` | 2305-2306 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
 | `iommu.rs` | 2308-2309 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 2395 | Unreachable on the measured architecture | The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 2689 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
-| `iommu.rs` | 2825 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
-| `iommu.rs` | 2827 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
+| `iommu.rs` | 2411 | Unreachable on the measured architecture | The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 2705 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
+| `iommu.rs` | 2841 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
+| `iommu.rs` | 2843 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
 | `iommu/smmuv3.rs` | 263 | Reached only when something has already failed | A unit that cannot do what this driver asks -- no stage 2, no 16-bit VMIDs, a table too small -- or whose registers cannot be mapped: left alone, its functions untranslated. QEMU's SMMUv3 offers all of it. |
 | `iommu/smmuv3.rs` | 337 | Reached only when something has already failed | The closing row of program is the return of a unit that never started its queues or never finished its first command: QEMU's SMMUv3 always does. |
 | `iommu/smmuv3.rs` | 371-372 | Reached only when something has already failed | The event queue overflowed: 128 events unread. The audit reads it at the end of boot, and a passing boot records one event, the probe's. |
-| `iommu/smmuv3.rs` | 414 | Hardware the measured machine does not have | A stream past the table this driver keeps (2^STREAM_BITS entries): a requester ID that large, on a machine with that many PCI functions or a high segment mapping. virt's requester IDs fit. |
-| `iommu/smmuv3.rs` | 434-435 | Reached only when something has already failed | No VMID left -- every one of the unit's VMIDs held by a live domain, thousands of them -- or none recordable for want of memory; or an MSI doorbell mapping the tables just made refused. A boot makes a handful of domains. |
-| `iommu/smmuv3.rs` | 441 | Reached only when something has already failed | No VMID left -- every one of the unit's VMIDs held by a live domain, thousands of them -- or none recordable for want of memory; or an MSI doorbell mapping the tables just made refused. A boot makes a handful of domains. |
-| `iommu/smmuv3.rs` | 481 | Run, and credited to another line | Run by the service check's a_dropped_domain_gives_its_stream_back, whose dropped domain detaches through Unit::detach and gives its VMID and root back; release is inlined into detach there, and these entry and exit rows are only in the out-of-line release, which only attach's refused doorbell mapping calls. |
-| `iommu/smmuv3.rs` | 484 | Run, and credited to another line | Run by the service check's a_dropped_domain_gives_its_stream_back, whose dropped domain detaches through Unit::detach and gives its VMID and root back; release is inlined into detach there, and these entry and exit rows are only in the out-of-line release, which only attach's refused doorbell mapping calls. |
+| `iommu/smmuv3.rs` | 420 | Hardware the measured machine does not have | A stream past the table this driver keeps (2^STREAM_BITS entries): a requester ID that large, on a machine with that many PCI functions or a high segment mapping. virt's requester IDs fit. |
+| `iommu/smmuv3.rs` | 440-441 | Reached only when something has already failed | No VMID left -- every one of the unit's VMIDs held by a live domain, thousands of them -- or none recordable for want of memory; or an MSI doorbell mapping the tables just made refused. A boot makes a handful of domains. |
+| `iommu/smmuv3.rs` | 447 | Reached only when something has already failed | No VMID left -- every one of the unit's VMIDs held by a live domain, thousands of them -- or none recordable for want of memory; or an MSI doorbell mapping the tables just made refused. A boot makes a handful of domains. |
+| `iommu/smmuv3.rs` | 487 | Run, and credited to another line | Run by the service check's a_dropped_domain_gives_its_stream_back, whose dropped domain detaches through Unit::detach and gives its VMID and root back; release is inlined into detach there, and these entry and exit rows are only in the out-of-line release, which only attach's refused doorbell mapping calls. |
+| `iommu/smmuv3.rs` | 490 | Run, and credited to another line | Run by the service check's a_dropped_domain_gives_its_stream_back, whose dropped domain detaches through Unit::detach and gives its VMID and root back; release is inlined into detach there, and these entry and exit rows are only in the out-of-line release, which only attach's refused doorbell mapping calls. |
 | `irq.rs` | 298 | Reached only when something has already failed | The closing row of dispatch is the return from its None arm, an interrupt that arrived with nothing registered. Counted (UNCLAIMED) and required zero by stage 3's timer check; a correctly programmed controller never delivers one. |
 | `main.rs` | 269 | Reached only when the kernel is stopping | The statement runs on every boot, under the rows of bring_up_memory's inlined body; the one row this line keeps in the AArch64 image is the argument setup of a panic_fmt call on the path where an inlined step of the bring-up has failed. |
 | `main.rs` | 296 | Reached only when the kernel is stopping | The failure arm in `kmain`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `INTERRUPT_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
@@ -725,7 +725,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**970** unreached statements, debug profile.
+**969** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
@@ -733,7 +733,7 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | Reached only when the kernel is stopping | 169 | 17% |
 | Reached only when something has already failed | 65 | 7% |
 | Run, and credited to another line | 19 | 2% |
-| Hardware the measured machine does not have | 346 | 36% |
+| Hardware the measured machine does not have | 345 | 36% |
 | Needs a test | 215 | 22% |
 
 ### armv7a: Unreachable on the measured architecture — 156 statements
@@ -811,7 +811,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `console/input.rs` |
 | 1 | `core` | `mm.rs` |
 
-### armv7a: Hardware the measured machine does not have — 346 statements
+### armv7a: Hardware the measured machine does not have — 345 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
@@ -821,7 +821,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 53 | `item` | `discovery/pci.rs` |
 | 45 | `core` | `device.rs` |
 | 40 | `core` | `console/screen.rs` |
-| 39 | `core` | `iommu.rs` |
+| 38 | `core` | `iommu.rs` |
 | 15 | `core` | `discovery/acpi.rs` |
 | 5 | `item` | `main.rs` |
 | 4 | `core` | `arch/armv7a/smp.rs` |
@@ -869,7 +869,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `sched/mod.rs` |
 | 4 | | *and 4 more files* |
 
-### armv7a: argued line by line — 357 statements
+### armv7a: argued line by line — 356 statements
 
 From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -1016,20 +1016,20 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `iommu.rs` | 2292 | Unreachable on the measured architecture | Programs the SMMUv3s the IORT describes, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
 | `iommu.rs` | 2305-2306 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
 | `iommu.rs` | 2308-2309 | Unreachable on the measured architecture | Reads the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 2395 | Unreachable on the measured architecture | The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
-| `iommu.rs` | 2402 | Hardware the measured machine does not have | Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 2421-2423 | Hardware the measured machine does not have | Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 2573-2575 | Unreachable on the measured architecture | Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 2579-2580 | Unreachable on the measured architecture | Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
-| `iommu.rs` | 2676 | Hardware the measured machine does not have | Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 2680 | Hardware the measured machine does not have | Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 2687 | Hardware the measured machine does not have | Counts a fault a unit recorded, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 2689 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
-| `iommu.rs` | 2818-2819 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 2821 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
-| `iommu.rs` | 2825 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
-| `iommu.rs` | 2827 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
-| `iommu.rs` | 2830 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 2411 | Unreachable on the measured architecture | The VT-d branch, for the DMAR, x86-64's ACPI description of its VT-d units, and a VT-d unit: neither exists on an Arm machine. |
+| `iommu.rs` | 2418 | Hardware the measured machine does not have | Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 2437, 2439 | Hardware the measured machine does not have | Attaching a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 2589-2591 | Unreachable on the measured architecture | Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 2595-2596 | Unreachable on the measured architecture | Streams recorded from the IORT, one of ACPI's tables: ARMv7-A boots through U-Boot with a device tree, and this kernel reads no ACPI there. |
+| `iommu.rs` | 2692 | Hardware the measured machine does not have | Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 2696 | Hardware the measured machine does not have | Asked only of a fault a unit recorded, for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 2703 | Hardware the measured machine does not have | Counts a fault a unit recorded, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 2705 | Reached only when something has already failed | A stray fault that is not a refused access: an SMMUv3 event of another kind. The audit requires none; a device whose DMA stops for another reason, or tables the unit refused, would be one. |
+| `iommu.rs` | 2834-2835 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 2837 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
+| `iommu.rs` | 2841 | Reached only when something has already failed | The first stray fault the audit read: a DMA fault no check provoked, which the boot then fails on (STAGE10_DMA_FAULT). |
+| `iommu.rs` | 2843 | Hardware the measured machine does not have | The out-of-domain probe's own fault, still recorded when the audit reads the unit: a unit that records it after the probe stopped looking. QEMU's VT-d and SMMUv3 record every fault of the probe's before its completion is seen, and the probe drains them then; every suite boot reports 0 late faults. |
+| `iommu.rs` | 2846 | Hardware the measured machine does not have | Reads a unit's faults, only for a translated domain, which needs an IOMMU unit the kernel programs: on ARMv7-A it programs none -- bring_up_smmu reads only the IORT, and the SMMUv3 virt's device tree describes is left alone by design, since U-Boot keeps its virtio devices from offering the platform's translation and they would bypass it anyway. |
 | `main.rs` | 296 | Reached only when the kernel is stopping | The failure arm in `kmain`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `INTERRUPT_BRING_UP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 443 | Reached only when the kernel is stopping | The failure arm in `check_timer_and_start_clocks`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE3_TIMER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 610 | Reached only when the kernel is stopping | The failure arm in `check_filesystems`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE8_ROOT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |

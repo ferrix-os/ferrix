@@ -1581,5 +1581,21 @@ package FerrixIommuRequirements {
             attribute :>> parent = ("H.DMA.3", "H.DMA.8");
             attribute :>> unit = ("iommu::vtd::Unit::flush", "iommu::vtd::Unit::invalidate_iotlb");
         }
+        requirement <'L.iommu.110'> aRefusedAttachGivesNoDomainUnderK14 : ItemLowLevel {
+            attribute :>> statement = "In a kernel that holds nodes to K14's grant (fast, max,
+                or a certified level), a function whose unit refuses its attachment shall get
+                no domain, so nothing of it is pinned, never an untranslated one, and the
+                refusal is said by name; in any other kernel it gets an untranslated one.";
+            attribute :>> criterion = "A user kernel's boot check
+                (iommu::check::check_attach_refused) fails the first allocation of an
+                attachment to the first function a unit would translate and no domain is
+                made for, and requires that nothing is left attached: under fast no domain,
+                under --personality user alone an untranslated one; a boot of fast must print
+                that line. With the untranslated answer given under fast too, the boot stops
+                naming a refused attachment that gave a domain (n27e-kc2-held-a64); with no
+                domain given outside a held kernel, it stops naming that (n27e-kc2-open-x86).";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = "iommu::domain_placed";
+        }
     }
 }
