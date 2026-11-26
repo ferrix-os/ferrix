@@ -97,7 +97,7 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   the overnight run of 2026-11-03 landed B5's orphan step and, by 2026-11-05,
   most of its other work (K1 to K7, K10 to K17, `linuxd` booting
   Linux programs, K8, K14, `btrfsd`, M6). `fast` builds on AArch64 since
-  2026-11-05, x86-64 and `max` are still refused
+  2026-11-05 and on x86-64 since 2026-11-26, `max` is still refused
   (`docs/microkernel/FLIP.md`). The kernel's optional parts are crates under
   `src/kernel/extensions/` (the crate split's S0 to S5b, 2026-11-06 to -12),
   and a kernel with none of them builds with `board_glue=off` (`docs/microkernel/CORE-WITHOUT-EXTENSIONS.md` E1 to E4; E3, E5

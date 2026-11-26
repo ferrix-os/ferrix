@@ -17,11 +17,11 @@ review, not independent verification (F-27). No line here claims a certified lev
 
 Its loader starts only a verifying slot, so each image built for it signs one leaf of the development key `dev-slot`, a tree of 2^15, whose log held 84 lines on 2026-11-05. Each sweep leaves the log's line count here. SIGNING's 50% alarm is not in the soft signer yet (BACKLOG). A row of `fast` on CI needs `ci-sign` and its anchor first: `docs/SIGNING.md` §6.5.
 
-## What `cargo xtask flags` refuses today (9ebe69358: `fast` builds on AArch64, x86-64 waits on `test-net`; `max` is refused)
+## What `cargo xtask flags` refuses today (9ebe69358: `fast` builds on AArch64; on x86-64 too since the x86-64 flip of 2026-11-26; `max` is refused)
 
 | Profile | Value | `built` | On which arch it fails | Next step |
 |---|---|---|---|---|
-| both | `personality=user` | `yes`, AArch64 alone (`built_on`) | x86-64: not in `built_on` yet; BACKLOG 603's cause is fixed (below), and the flip is its own data-and-test commit and review (ledger 10333 P7); ARMv7-A: in no claim (7016 B.1) | Flipped at 9ebe69358 (ledger 7363, 7485). BACKLOG 603, the paced fetch, traced and fixed 2026-11-26 (ledger 10333, F-126): linuxd's bridge ended its "port out" carrier on a bell refused as full, and the net driver was never rung again; now the bell is dropped and counted. Under `fast`'s values ad hoc on x86-64 KVM, `test-net` 6 of 15 failed before (`n27c-p-*`, each with the bell line), 10 of 10 PASSED after (`n27c-f6-net-x86-*`, five with bells dropped), AArch64 TCG under `fast` 3 of 3. The four earlier sightings (`mkf-s3-net`, `mbl-g5e-net`, `mbl-g7-c1-net`, `mkf3b-net2-x86`) each printed the bell line. Owed before `x86_64` joins `built_on`: the flip's own request, listing what becomes buildable (`fast` on x86-64, K14's held arm on VT-d and AMD-Vi, LV.2's x86_64-uefi-pc family, 7485 D.1 (a)), each row on its hash, B.7's control. B.3 on that hash, `mkf3b-*`: `test-flags`, `test-linuxd`, `test-init`, `test-shell`, `test-vfs`, `test-threads --smp 2`, `test-seat`, `test-btrfs` PASSED on x86-64 KVM and AArch64 TCG; `test-net` on x86-64 FAILED 1 of 4 (above); B.3's controls re-FIRED per architecture: `mkf3b-tables-*` (5714 (16), case 52), `mkf3b-r5-*`, the copy-miss row's `mkf3b-copymiss-*`. AArch64's shim and linuxd build and run there (the old 144 errors are gone). `max` is refused by its other values |
+| both | `personality=user` | `yes`, x86-64 and AArch64 (`built_on`) | ARMv7-A: in no claim (7016 B.1) | Flipped at 9ebe69358 (ledger 7363, 7485). BACKLOG 603, the paced fetch, traced and fixed 2026-11-26 (ledger 10333, F-126): linuxd's bridge ended its "port out" carrier on a bell refused as full, and the net driver was never rung again; now the bell is dropped and counted. Under `fast`'s values ad hoc on x86-64 KVM, `test-net` 6 of 15 failed before (`n27c-p-*`, each with the bell line), 10 of 10 PASSED after (`n27c-f6-net-x86-*`, five with bells dropped), AArch64 TCG under `fast` 3 of 3. The four earlier sightings (`mkf-s3-net`, `mbl-g5e-net`, `mbl-g7-c1-net`, `mkf3b-net2-x86`) each printed the bell line. x86-64 joined `built_on` on 2026-11-26 by its own data-and-test commit (ledger 10492): its sweep is the table *`fast`'s x86-64 sweep* below. What it made buildable: `fast` on x86-64; LV.2's `x86_64-uefi-pc` family, already in `fast.toml`'s `slot_families`, now reached, right at level none; above none `check-item-boundary.py`'s profile judge refuses a slot family outside `claim_architectures` (2858-2862, ledger 7011 LV.2), so raising `fast`'s level with `claim_architectures = ["aarch64"]` fails `check` until x86-64 joins the claim; 7485 D.1 (a). K14's held arm on VT-d and AMD-Vi (10291 K10) is due with K14's landing, not on develop yet. The bridge's "port in" (F-127, reserved, parked) costs latency, not a row, there as on AArch64. B.3 on that hash, `mkf3b-*`: `test-flags`, `test-linuxd`, `test-init`, `test-shell`, `test-vfs`, `test-threads --smp 2`, `test-seat`, `test-btrfs` PASSED on x86-64 KVM and AArch64 TCG; `test-net` on x86-64 FAILED 1 of 4 (above); B.3's controls re-FIRED per architecture: `mkf3b-tables-*` (5714 (16), case 52), `mkf3b-r5-*`, the copy-miss row's `mkf3b-copymiss-*`. AArch64's shim and linuxd build and run there (the old 144 errors are gone). `max` is refused by its other values |
 | both | `fs=server` | `yes`, x86-64 and AArch64 | ARMv7-A, as `personality=user` | Widened at 9ebe69358 with B.3's rows on its hash: `mkf3b-btrfs-*`, `mkf3b-restart2-*`, `mkf3b-init-*` PASSED |
 | `fast` | `partition_speculation=partition` | `yes`, x86-64 and AArch64 | | Flipped at 9ebe69358. Host: `syscall::region_check` on a Bare caller, every image (7184 B4.1). None at an exit: the regions line, held by `regions_problem`, `mkf2j-c-partition` FIRED. One at a partition switch: cases 193, 194, `domains.rs` (ledger 7216 T.1, 7249 N.1), which replace 7011 B.4's `test-netd` for this row; `test-netd`'s second partition stays M8's. No shipped job is marked (`JOB_SPECULATION_DOMAIN`), so every switch between spaces takes the full barrier, safe and stronger than the flag says; partmgr marking is an M5 row |
 | `max` | `partition_speculation=exit` | `yes`, x86-64 and AArch64 | | Flipped (ledger 10144), rows ad hoc, below (*`max`'s ad-hoc values*). The regions line says `exit` and 51 barriers on 51 exits, x86-64 KVM; AArch64 TCG reads the same count, of barriers decided and none issued, labelled "(decided: this processor model has no barrier to issue)": TCG measures no speculation, and the real core's row stays BACKLOG's (*AArch64's restricted exit on a real core*). The swap (the exit's barrier skipped) FIRED on both, case 82; the regions line made to say `partition` FIRED `regions_problem`. nm: `partition`'s `switch_barrier_offered` out, by the gate, with its plant FIRED. `exit`'s own barrier is inline at `restricted_left`: no symbol of its own |
@@ -177,8 +177,44 @@ tags `n27c-f-*`: `check`; `test-flags` M on x86-64 KVM and AArch64 TCG; `test-ke
 as `gate-rows` lists it (x86-64), and under `present`'s own values on x86-64, AArch64 and ARMv7-A; the five plants
 and B.7's control again. The swap and the regions-line controls carry: neither file moved.
 
+## `fast`'s x86-64 sweep (2026-11-26, ledger 10492, 10333 P7)
+
+Through `gate.sh`, `GATE_PRIORITY=1`, `--kernel-profile fast`, x86-64 KVM, tags `n27c-x-*`, logs in
+`~/.local/share/ferrix/logs/queue/`. The rows ran on 748a5d528, whose tree is the flip's (landed as 01ca70c8b; `git diff --stat`
+empty: one commit, two messages). The build line reads `profile=fast`. AArch64's column is the 9ebe69358 sweep's
+above: nothing of an AArch64 image changes with a `built_on` word.
+
+| Row | x86-64 KVM |
+|---|---|
+| `check` | PASSED `-check` |
+| `test-flags` (test-boot here) | PASSED `-flags` |
+| `test-linuxd` | PASSED |
+| `test-init` | PASSED |
+| `test-shell` | PASSED |
+| `test-vfs --init busybox` | PASSED `-vfs` |
+| `test-threads --smp 2` | PASSED |
+| `test-seat` | PASSED |
+| `test-net --init busybox` | PASSED 10 of 10 (`-net-1` to `-10`), the n of 10333 P4 at BACKLOG 603's before-rate; `-net-5` dropped bells (at least 8) and passed |
+| `test-btrfs` | PASSED |
+| `test-btrfsd-restart --init busybox` | PASSED `-restart` |
+| `test-kaslr` | PASSED |
+| `test-netboot` | PASSED |
+| `test-rustc` | PASSED, `FERRIX_RUSTC_SYSROOT` at the 1.99.1 volume (the default volume is 1.97.1, on the customer's list) |
+| `test-container` | PASSED |
+| `test-kernel-shape` | PASSED `-shape` |
+| `check-stack-depth` | PASSED `-sd` |
+| `test-kernel-symbols --release`, `present` | NOT RUN: a flip of data changes no `present` image |
+| 5714 (16)'s handle control | FIRED `-tables`, case 52 |
+| R5's control | FIRED `-r5`, "lift-calls FAILED" |
+| The copy-miss row's control | FIRED `-copymiss` |
+| B.7's controls (`--expect-host`) | FIRED `-b7` (`personality=user`'s `built_on` back to `["aarch64"]`), `-b7-fa` (`fault_ahead=on` back to adhoc), `-b7-level` (`level = "sc2"`: rule 3, core at present), on 3225f7258, the flip's tree under an earlier message |
+| K14 at no memory, VT-d (10492 X5; F-125, a420f5ec9 landed first) | PASSED `-k14-x86` on the rebased hash: "pci 0000:00:00.0's refused attachment gave no domain and left nothing attached, as a profile held to K14's grant must"; the held arm made untranslated FIRED `-k14held-x86` (panic, stage 10); AMD-Vi NOT RUN: the gate's x86-64 machine has a VT-d unit, none has AMD-Vi |
+| `test-driver-model` | NOT RUN under `fast`: it boots with `ferrix.unisolated`, outside `fast`'s permitted boot options (10312 M3) |
+| §12's failing rows | NOT RUN, each for §12's own cause, as in the 9ebe69358 sweep |
+
 ## Where it stands
 
+* 2026-11-26, ledger 10492: `fast` builds on x86-64 too, `personality=user` built there (`n27c-x-*`), after BACKLOG 603's fix (F-126). `max` gains nothing: it claims AArch64 alone.
 * 2026-11-26, ledger 10144: `max`'s `partition_speculation=exit`, `restricted_fastpath=off` and `fault_ahead=off` are `built` on x86-64 and AArch64, on rows ad hoc, not `max` (the section above). `max` is still refused, by `kernel_memory=retyped` and `schedule=windows`, and on x86-64 by `personality=user`'s `built_on` too (BACKLOG 603). F-122, `fault_ahead=on`'s walk control, closed the same night (ledger 10178). M5's flip and M7 keep all of theirs.
 * 2026-11-05, ledger 7363, 7485: **`fast` builds on AArch64**, at level none held to sc2 (9ebe69358, the flip): x86-64 is refused by `personality=user` alone until `test-net`'s paced fetch is traced (BACKLOG 603); its six values flipped as data, B.7's list empty, `L.x86_64.272`-`.275` and `.282` tagged, the sweep above. `max` is still refused, by `exit`, `off`, `retyped`, `windows`. M5's flip and M7 keep all of theirs.
 * 2026-11-05: `fast` and `max` are still refused, by every line of the first table but `fs=server` on x86-64. Landed: the profiles' target, `built_on`, the signed slot, this file (9b5fa6957); `schedule=edf` dark and `lode`'s reload as a build value (fb32c5f77). AArch64's shim builds and runs Linux programs: `test-linuxd`, `test-shell`, `test-threads --smp 2` read PASSED under `--personality user` (`mkf-5-*`), `test-seat`, `test-init`, `test-btrfs` under `fs=server` (`mkf-s1-*`, older tree). None of it flips a `built`.
