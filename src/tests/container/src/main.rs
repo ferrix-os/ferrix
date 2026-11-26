@@ -732,14 +732,33 @@ fn pid_one(outside: &[String], host: &str) -> ! {
 
 /// A program walking up through fresh memory to just under `memory.max`, and staying under it,
 /// is charged for what it touched: nothing a fault brought along pushes it over, so
-/// `memory.events` does not move (`fault_ahead`, ledger 6537). The room left is under
+/// `memory.events` does not move (`fault_ahead`, ledger 6537 A7's walk). The room left is under
 /// `write_ahead`'s seven pages, once the walk's own tables are counted.
+///
+/// Whether the last fault's pages ahead would reach past the limit depends on where the walk
+/// ends among them: faults come one in eight on a walk, so a walk that ends just after one has
+/// seven ahead of it, and one that ends at the last page of a batch has none. One walk saw the
+/// defect in some builds and not others as the program's own charges moved its length by two
+/// pages (F-122: 4120b4def, 333,912 to 340,216 bytes used, 1,962 to 1,960 pages). So it walks
+/// eight times, each with one more page of ballast touched first and one page shorter, the room
+/// at its end the same: every place among the eight is an end once.
+///
+/// Eight is `AHEAD_PAGES` (`src/kernel/src/user/space.rs`, the pages `write_ahead` commits past a
+/// walking fault: seven) plus the fault's own page. A wider window there needs more walks here.
+fn walk_to_the_limit() {
+    // `AHEAD_PAGES` plus one: a fault and the pages it brings along.
+    for ballast in 1..=8 {
+        walk_once(ballast);
+    }
+}
+
+/// One walk of [`walk_to_the_limit`], after `ballast` pages touched in a mapping of their own.
 ///
 /// The room is measured last: everything this program allocates for itself (the reads of
 /// `memory.events` among them, whose heap growth is the allocator's and differs between builds)
 /// happens before `memory.current` is read, and nothing allocates between that read and the
 /// walk's end, so the room left is the walk's alone.
-fn walk_to_the_limit() {
+fn walk_once(ballast: usize) {
     const PAGE: usize = 4096;
     /// What is left beyond the walk: about four pages once its tables are charged, under
     /// `write_ahead`'s seven.
@@ -751,6 +770,27 @@ fn walk_to_the_limit() {
         );
         field(&text, "max")
     };
+    // Charged before `memory.current` is read, so the walk is that much shorter and ends a page
+    // further back among its faults. Exactly its own pages: nothing ahead of it is mapped.
+    // SAFETY: a fresh anonymous mapping, touched below and unmapped before the return.
+    let held = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            ballast * PAGE,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
+    if held == libc::MAP_FAILED {
+        fail("the walk's ballast could not be mapped");
+    }
+    let held = held.cast::<u8>();
+    for page in 0..ballast {
+        // SAFETY: inside the mapping above.
+        unsafe { held.add(page * PAGE).write_volatile(1) };
+    }
     // Before `memory.current` is read, not after: this read can grow the heap by a page (seen in
     // the builds of both rustc 1.97.1 and 1.99.1), and after the read that page came out of the
     // room `LEFT` names; under 1.99.1's build the walk then went over.
@@ -785,8 +825,10 @@ fn walk_to_the_limit() {
         // SAFETY: inside the mapping above.
         unsafe { walk.add(page * PAGE).write_volatile(1) };
     }
-    // SAFETY: the mapping above, which nothing else names.
-    if unsafe { libc::munmap(walk.cast(), mapped * PAGE) } != 0 {
+    // SAFETY: the two mappings above, which nothing else names.
+    if unsafe { libc::munmap(walk.cast(), mapped * PAGE) } != 0
+        || unsafe { libc::munmap(held.cast(), ballast * PAGE) } != 0
+    {
         fail("the walk's memory could not be unmapped");
     }
     // Read after the unmap: `memory.events` only counts up, so it still holds anything the walk was
@@ -797,7 +839,8 @@ fn walk_to_the_limit() {
         "memory.current could not be read",
     );
     say(&format!(
-        "a walk of {pages} pages from {used} bytes used, {} once unmapped: memory.events max moved {moved}",
+        "a walk of {pages} pages after {ballast} of ballast, from {used} bytes used, {} once \
+         unmapped: memory.events max moved {moved}",
         now.trim()
     ));
     if moved != 0 {
