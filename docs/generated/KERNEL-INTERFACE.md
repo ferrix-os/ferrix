@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3140 declarations in the core's files, 218 in the item's; 280 checks-only.
+3141 declarations in the core's files, 218 in the item's; 280 checks-only.
 
 ## ferrix-kernel-core
 
@@ -3107,6 +3107,7 @@ checks above is `pub` for raised checks (F3).
 | `CpuTime::runnable` | field | item, load |  |
 | `CpuTime::switches` | field | load, bin |  |
 | `PreparedTask::launch` | method | load, bin |  |
+| `PreparedTask::try_launch` | method | load |  |
 | `Summary::switches` | field | load, bin |  |
 | `SyncPlaced::COUNT` | associated const | load (checks) |  |
 | `SyncPlaced::NAMES` | associated const | load (checks) |  |

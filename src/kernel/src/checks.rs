@@ -40,6 +40,11 @@ const OPTION: &str = "ferrix.checks";
 const SKIP: &str = "skip";
 const RUN: &str = "run";
 
+/// A check-only option: the call of `process_create_shared` to refuse once (F-129's check,
+/// `syscall::native::region::refuse_process_at`). Read only in a kernel with its checks.
+#[cfg(ferrix_checks = "on")]
+const REFUSE_PROCESS_OPTION: &str = "ferrix.check_refuse_process";
+
 /// Read `ferrix.checks`, and say what it asked for.
 ///
 /// Any value but the two is reported and ignored: running every check is the
@@ -70,6 +75,17 @@ pub fn init(view: &BootView<'_>) {
         Some(other) => {
             println!("  checks   {OPTION}={other} is not understood; every self-check runs");
         }
+    }
+    // F-129's check: one refused process of a region, for a row whose program must hear it.
+    #[cfg(ferrix_checks = "on")]
+    if let Some(at) = view
+        .option(REFUSE_PROCESS_OPTION)
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        crate::syscall::native::region::refuse_process_at(at);
+        println!(
+            "  checks   {REFUSE_PROCESS_OPTION}={at}: that call of process_create_shared is refused"
+        );
     }
     // The way out's check that no poster forgot its bit runs with the rest
     // (`sched::work::audit`); the core keeps its own copy of the answer.

@@ -218,6 +218,54 @@ pub(crate) fn btrfsd_carried(busybox: &Path) -> Result<Vec<ports::File>> {
     .collect())
 }
 
+/// `cargo xtask test-refused-fork`'s script (F-129): a subshell forks children that wait
+/// until one fork answers `EAGAIN`, its ring-0 process refused below by
+/// [`REFUSED_FORK_OPTION`]; every child it started is running, and the next fork runs.
+pub(crate) const REFUSED_FORK_SCRIPT: &str = r#"echo "refused-fork: started"
+( i=0; while [ $i -lt 100 ]; do sleep 120 & echo $! >> /tmp/kids; i=$((i + 1)); done; echo "refused-fork: F-129: no fork was refused" )
+sleep 1
+started=$(wc -l < /tmp/kids)
+running=$(grep -l '^sleep$' /proc/[0-9]*/comm 2>/dev/null | wc -l)
+if [ "$running" = "$started" ]; then echo "refused-fork: the children started are the ones running"; else echo "refused-fork: F-129: a forked child is listed and never ran ($started started, $running running)"; fi
+kill $(cat /tmp/kids)
+sh -c 'exit 4'; echo "refused-fork: next fork status $?"
+exit 9
+"#;
+
+/// The check-only boot word [`REFUSED_FORK_SCRIPT`]'s image alone carries: ring 0 refuses that
+/// call of `process_create_shared` once, inside the script's loop (F-129; ledger 10775 X1).
+pub(crate) const REFUSED_FORK_OPTION: &str = "ferrix.check_refuse_process=60";
+
+/// [`REFUSED_FORK_SCRIPT`]'s lines, in order: the forking program reads `EAGAIN`, the children
+/// it started are the ones running, nothing of the refused one is left, its next fork runs.
+pub(crate) const REFUSED_FORK_EXPECTED: &[&str] = &[
+    "refused-fork: started",
+    "sh: can't fork: Resource temporarily unavailable",
+    "refused-fork: the children started are the ones running",
+    "refused-fork: next fork status 4",
+];
+
+/// What [`REFUSED_FORK_SCRIPT`] runs: busybox under each applet's name.
+pub(crate) fn refused_fork_carried(busybox: &Path) -> Result<Vec<ports::File>> {
+    let bytes = std::fs::read(busybox)
+        .map_err(|error| Error::new(format!("reading {}: {error}", busybox.display())))?;
+    Ok([
+        "bin/sh",
+        "bin/cat",
+        "bin/sleep",
+        "bin/kill",
+        "bin/wc",
+        "bin/grep",
+    ]
+    .into_iter()
+    .map(|path| ports::File {
+        path: path.to_owned(),
+        mode: 0o755,
+        content: ports::Content::Bytes(bytes.clone()),
+    })
+    .collect())
+}
+
 /// What [`LIFT_SCRIPT`] runs: busybox under each applet's name.
 pub(crate) fn lift_carried(busybox: &Path) -> Result<Vec<ports::File>> {
     let bytes = std::fs::read(busybox)

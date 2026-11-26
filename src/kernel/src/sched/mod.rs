@@ -1605,6 +1605,17 @@ impl PreparedTask {
         enqueue(&self.task, self.cpu, self.queue);
         Arc::clone(&self.task)
     }
+
+    /// As [`PreparedTask::launch`], which cannot fail here: putting a made task on a queue takes
+    /// nothing, its stack and its count were taken when it was prepared. One of a pair with
+    /// linuxd's, whose launch starts a ring-0 process or thread that ring 0 may refuse (F-129).
+    ///
+    /// # Errors
+    ///
+    /// None in this kernel.
+    pub fn try_launch(self) -> Result<Arc<Task>, &'static str> {
+        Ok(self.launch())
+    }
 }
 
 impl Drop for PreparedTask {

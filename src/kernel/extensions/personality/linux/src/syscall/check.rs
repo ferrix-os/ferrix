@@ -5308,7 +5308,7 @@ pub fn spawn_in(
     crate::object::process::Host::core(&**process)
         .list_task(prepared.task())
         .map_err(|_| "no memory to list a check's task")?;
-    Ok(prepared.launch())
+    prepared.try_launch()
 }
 
 /// Two programs pinned to one processor both finish, each with its own

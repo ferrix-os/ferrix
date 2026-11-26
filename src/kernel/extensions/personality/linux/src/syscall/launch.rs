@@ -241,7 +241,7 @@ fn start_native(
     };
     let prepared = claim.prepare(None).map_err(|_| StartRefused::NoTask)?;
     let argument = argument().map_err(StartRefused::Argument)?;
-    let _task = prepared.start(argument);
+    let _task = prepared.start(argument).map_err(|_| StartRefused::NoTask)?;
     Ok(())
 }
 

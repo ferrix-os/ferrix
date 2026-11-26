@@ -266,7 +266,7 @@ impl Bare {
         }
         // A kill that walked the list before this task was on it stored
         // `terminated` first, which `run_thread` reads.
-        let _task = prepared.launch();
+        let _task = prepared.try_launch()?;
         Ok(object)
     }
 

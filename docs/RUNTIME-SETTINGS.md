@@ -78,6 +78,7 @@ reference configuration). **DT** = also read from `/chosen/bootargs`.
 | Word | Values | Default | Effect | Arch | Ring | Cert. config (`present`) | Requirement | Class |
 |---|---|---|---|---|---|---|---|---|
 | `ferrix.checks` | `run`, `skip` | `run` | `skip` brings stages 2–12 up without their self-checks; the boot ends `FERRIX-BOOT-UNCHECKED`. Other values said and ignored. DT. | all | item (`checks.rs`) | `run` only | H.BOOT.2, H.AUD.12 | admin (a "fast boot" candidate; desktop images ship `skip` in `DEFAULTS.TXT`) |
+| `ferrix.check_refuse_process` | a call number | none | **Check-only**: in a kernel built `checks=on`, ring 0 refuses that call of `process_create_shared` once (`NO_MEMORY`), so a row shows linuxd answering a refused start to the forking program as `EAGAIN` (F-129). Not read, and not in the image, under `checks=off` (`REFUSE_PROCESS_OPTION` and `refuse_process_at` are `cfg(ferrix_checks = "on")`). | all | item (`checks.rs`, `syscall/native/region.rs`) | absent | — | check-only (rows only) |
 | `ferrix.root` | `btrfs`, `tmpfs` | `btrfs` (switch to a volume labelled `ferrix-root` if one exists) | `tmpfs` keeps `/` in memory (the live installer medium). Other values said; btrfs tried. | all | load (`fs/root_disk.rs`) | any | — | admin (installer writes it) |
 | `ferrix.init` | absolute path | the built-in program, else `/sbin/init` | the file pid 1 is started from; a relative value is said and ignored. DT. | all | item (`init.rs`) | any | H.BOOT.15, L.init.1 | admin |
 | `ferrix.onexit` | `reset`, `panic` (anything else = power off) | power off | what the machine does when init exits. DT. | all | item (`power.rs`) | any | H.BOOT.6, H.BOOT.7, H.FAIL.1 | test-only in practice (gates) / admin |
@@ -118,6 +119,7 @@ Not boot words although they look like it: `ferrix.devmgr.events`,
 
 | Source | Words | Code |
 |---|---|---|
+| `test-refused-fork`'s one image (checks=on alone) | `ferrix.check_refuse_process=60` (F-129's refused fork, inside the script's loop; ledger 10775 X1) | `tools/common/xtask/src/shell.rs` `REFUSED_FORK_OPTION` |
 | Every image that boots `/sbin/init` (`CMDLINE.TXT`) | `ferrix.init=/sbin/init ferrix.devmgr=init` | `tools/common/xtask/src/init.rs` `command_line` |
 | Desktop images (`run-compositor`, `--everything`, `DEFAULTS.TXT`) | `ferrix.checks=skip`, plus `drm.edid_firmware=…` with `--edid` | `compositor/run.rs` `DESKTOP_DEFAULTS` |
 | Board desktop (`flash --compositor`) | `ferrix.checks=skip ferrix.init=/sbin/init` | `compositor/run.rs` `DESKTOP_BOARD_DEFAULTS` |

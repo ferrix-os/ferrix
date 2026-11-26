@@ -76,7 +76,7 @@ use ferrix_sync::Once;
 use ferrix_vma::VmaFlags;
 
 mod lift;
-mod region;
+pub(crate) mod region;
 
 use crate::arch;
 use crate::audit;

@@ -216,6 +216,8 @@ above: nothing of an AArch64 image changes with a `built_on` word.
 
 ## Where it stands
 
+* 2026-11-26, ledger 10859 K3: a `max` image, built `checks=on` as every profile is, reads the test-only boot words compiled in with the checks (`ferrix.check_refuse_process`, F-129's; `ferrix.scrub`) though no profile permits them, until item 4's rule refuses a boot whose line carries a word its profile does not permit. That stands among what refuses `max`. `check-build-flags.py` refuses a profile that permits a `rows_only` word at any level.
+
 * 2026-11-26, ledger 10222: **WZ.6 is done**: every `yield_now` of a check answered in K9 §4.1 (31 calls in 16 files, `check-yield-sites.py` in `check`, its control FIRED), a check's spin-wait on another task gives way under `windows`. `max` is still refused, by `schedule=windows` (the order cases judged from the class's own picks on AArch64 and the row 5 of 5, 10101 B4, 10241; `.text` and count A, 10361 D3) and `kernel_memory=retyped` (K16.5, K16.7, K16.9, F.8, K16.2, the K16 preconditions row), and on x86-64 by `personality=user`'s `built_on` for `max`'s claim, which is AArch64 alone.
 
 * 2026-11-26, ledger 10492: `fast` builds on x86-64 too, `personality=user` built there (`n27c-x-*`), after BACKLOG 603's fix (F-126). `max` gains nothing: it claims AArch64 alone.

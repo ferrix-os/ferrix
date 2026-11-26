@@ -105,6 +105,10 @@ static MADE: AtomicU64 = AtomicU64::new(0);
 
 /// Allocate a stack with `task`'s pointer in it; answers the top to start from.
 fn stack_for(task: &Arc<Task>) -> Result<usize, &'static str> {
+    stack_with_base(task).map(|(_, entry)| entry)
+}
+/// [`stack_for`], with the allocation's base, for [`give_back_stack`].
+fn stack_with_base(task: &Arc<Task>) -> Result<(usize, usize), &'static str> {
     let layout = Layout::from_size_align(STACK_BYTES, STACK_BYTES).map_err(|_| "stack layout")?;
     // SAFETY: the layout is not zero sized. The stack lives until `exit_leaving`,
     // whose thread is on it and leaks it for now.
@@ -115,7 +119,20 @@ fn stack_for(task: &Arc<Task>) -> Result<usize, &'static str> {
     let top = base as usize + STACK_BYTES - 16;
     // SAFETY: inside the allocation just made, aligned to 16.
     unsafe { *(top as *mut *const Task) = Arc::into_raw(Arc::clone(task)) };
-    Ok(crate::arch::entry_stack(top))
+    Ok((base as usize, crate::arch::entry_stack(top)))
+}
+/// Give back a stack [`stack_with_base`] made for a thread that never started (F-129): its
+/// task's reference, then its memory.
+fn give_back_stack(base: usize) {
+    let Ok(layout) = Layout::from_size_align(STACK_BYTES, STACK_BYTES) else {
+        return;
+    };
+    let top = base + STACK_BYTES - 16;
+    // SAFETY: `stack_with_base` wrote the reference here from `Arc::into_raw`, and no
+    // thread ran on the stack, so nothing else read or took it.
+    drop(unsafe { Arc::from_raw(*(top as *const *const Task)) });
+    // SAFETY: allocated by `stack_with_base` with this layout; no thread is on it.
+    unsafe { alloc::alloc::dealloc(base as *mut u8, layout) };
 }
 
 fn new_task(
@@ -200,9 +217,19 @@ fn give_bootstrap(process: &crate::object::process::Process, kernel: u32) {
     }
 }
 
+/// Start `task`'s thread. A refusal of the kernel below leaves nothing of it here (F-129, H2):
+/// its stack given back, and a kernel process made for it, or a thread counted on one,
+/// given back too.
 fn launch(task: &Arc<Task>) -> Result<(), &'static str> {
     reap_stacks();
-    let top = stack_for(task)?;
+    let (base, top) = stack_with_base(task)?;
+    let started = start_on(task, top);
+    if started.is_err() {
+        give_back_stack(base);
+    }
+    started
+}
+fn start_on(task: &Arc<Task>, top: usize) -> Result<(), &'static str> {
     let entry = thread_main as *const () as usize;
     // A program's first thread starts a kernel process of its own (K11); every
     // other thread of it starts from one already in that process, as a Linux
@@ -216,14 +243,29 @@ fn launch(task: &Arc<Task>) -> Result<(), &'static str> {
             task.bound_process
                 .store(u64::from(kernel), Ordering::Release);
             give_bootstrap(process, kernel);
-            return crate::sys::process_start(kernel, entry, top).map_err(|()| "no start");
+            // A refused start ran no instruction of the process: ring 0 answers
+            // process_start's refusal before the thread exists, so nothing is on the stack
+            // and the stack and the kernel process go back here.
+            return crate::sys::process_start(kernel, entry, top).map_err(|()| {
+                task.bound_process.store(0, Ordering::Release);
+                crate::fill::kernel_process_thread_gone(kernel);
+                "no start"
+            });
         }
         if let Some(kernel) = crate::fill::kernel_process_thread(root) {
             task.bound_process
                 .store(u64::from(kernel), Ordering::Release);
         }
     }
-    let handle = crate::sys::thread_create(entry, top).map_err(|_| "no thread")?;
+    let handle = crate::sys::thread_create(entry, top).map_err(|_| {
+        let kernel = task.bound_process.swap(0, Ordering::AcqRel);
+        if let Ok(kernel) = u32::try_from(kernel)
+            && kernel != 0
+        {
+            crate::fill::kernel_process_thread_gone(kernel);
+        }
+        "no thread"
+    })?;
     if task
         .thread_handle
         .compare_exchange(0, handle, Ordering::AcqRel, Ordering::Acquire)
@@ -296,7 +338,7 @@ pub fn spawn_user(
     cpu: Option<usize>,
     state: Option<BoxedUserState>,
 ) -> Result<Arc<Task>, &'static str> {
-    Ok(prepare_user(name, entry, thread, cpu, state)?.launch())
+    prepare_user(name, entry, thread, cpu, state)?.try_launch()
 }
 pub fn prepare_user(
     name: &'static str,
@@ -321,14 +363,17 @@ impl PreparedTask {
     pub fn task(&self) -> &Arc<Task> {
         &self.task
     }
-    pub fn launch(self) -> Arc<Task> {
+    /// Launch it, answering a refusal of the kernel below: its thread is then gone, never
+    /// started, and the caller hears why (a fork's `EAGAIN`, K16.9).
+    pub fn try_launch(self) -> Result<Arc<Task>, &'static str> {
         if let Err(why) = launch(&self.task) {
             crate::println!("linuxd: a thread did not start: {why}");
             if let Some(thread) = self.task.thread() {
                 thread.process().thread_gone(false);
             }
+            return Err(why);
         }
-        self.task
+        Ok(self.task)
     }
 }
 /// How a wake is counted; the kernel's scheduler is what acts on it.

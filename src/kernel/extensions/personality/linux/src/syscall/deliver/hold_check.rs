@@ -205,7 +205,7 @@ fn faulting(entry: fn(usize), with: Option<fn(usize)>) -> Result<Arc<Process>, &
         ready.push(prepared);
     }
     for prepared in ready {
-        let _ = prepared.launch();
+        let _ = prepared.try_launch()?;
     }
     Ok(process)
 }

@@ -996,7 +996,7 @@ fn spawn_times_thread(
     crate::object::process::Host::core(&**process)
         .list_task(prepared.task())
         .map_err(|_| "no memory to list a thread of the /proc times check")?;
-    Ok(prepared.launch())
+    prepared.try_launch()
 }
 
 /// The processor time a `stat` file counts, in clock ticks: fields 14 and

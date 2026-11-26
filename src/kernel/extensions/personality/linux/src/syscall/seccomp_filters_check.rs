@@ -982,7 +982,7 @@ fn spawn_member(
     crate::object::process::Host::core(&**process)
         .list_task(prepared.task())
         .map_err(|_| "no memory to list a thread of the check")?;
-    Ok(prepared.launch())
+    prepared.try_launch()
 }
 
 /// Whether the member that killed itself came back from its call.

@@ -2639,7 +2639,7 @@ pub fn start_on(process: &Arc<Process>, cpu: Option<usize>) -> Result<Arc<Task>,
     let thread = Thread::leader(process)
         .and_then(fallible::try_arc)
         .map_err(|_| "no memory for the process's first thread")?;
-    Ok(claim.prepare_thread(thread, cpu, None)?.launch())
+    claim.prepare_thread(thread, cpu, None)?.try_launch()
 }
 
 /// The right to start a process, held by one starter at a time.
@@ -2720,7 +2720,7 @@ impl StartClaim {
         cpu: Option<usize>,
         argument: u64,
     ) -> Result<Arc<Task>, &'static str> {
-        Ok(self.prepare(cpu)?.start(argument))
+        self.prepare(cpu)?.start(argument)
     }
 
     /// Make the process's first task without running it: everything about the
@@ -2783,22 +2783,30 @@ impl PreparedStart {
     ///
     /// The argument is written while the claim is held, so no other start can
     /// change it between here and the task reading it.
-    pub(crate) fn start(self, argument: u64) -> Arc<Task> {
+    ///
+    /// # Errors
+    ///
+    /// The kernel below refused the task's start (in linuxd, its ring-0 process or thread,
+    /// F-129); the claim is given back.
+    pub(crate) fn start(self, argument: u64) -> Result<Arc<Task>, &'static str> {
         if let Some(startup) = self.claim.process.startup.lock().as_mut() {
             startup.argument = argument;
         }
-        self.launch()
+        self.try_launch()
     }
 
-    /// Put the task on its queue and spend the claim.
-    fn launch(self) -> Arc<Task> {
+    /// Put the task on its queue and spend the claim; a launch the kernel below refuses is
+    /// answered and the claim given back: in linuxd a process's first task starts a ring-0 process of its own,
+    /// which ring 0 may refuse (its pid table at the description's limit, K16.9; no memory).
+    /// A fork's child must hear it as `EAGAIN`, not be counted started and never run.
+    fn try_launch(self) -> Result<Arc<Task>, &'static str> {
         let PreparedStart { task, mut claim } = self;
         let posting = sched::work::posting();
-        let task = task.launch();
+        let task = task.try_launch()?;
         tell_a_new_task(&claim.process, &task);
         drop(posting);
         claim.spent = true;
-        task
+        Ok(task)
     }
 }
 
@@ -2824,7 +2832,9 @@ pub(crate) fn start_forked(
     state: sched::BoxedUserState,
 ) -> Result<Arc<Task>, &'static str> {
     let claim = take_claim(thread.process())?;
-    Ok(claim.prepare_thread(thread, None, Some(state))?.launch())
+    claim
+        .prepare_thread(thread, None, Some(state))?
+        .try_launch()
 }
 
 /// Run a thread `clone` made in a process already running: it resumes from the
@@ -2857,7 +2867,7 @@ pub(crate) fn start_thread(
         .list_task(prepared.task())
         .map_err(|_| "no memory to list the thread's task")?;
     let posting = sched::work::posting();
-    let task = prepared.launch();
+    let task = prepared.try_launch()?;
     // At the weight of its creator's nice value, which the thread was made
     // with, not at nice 0: a program that was reniced and then started a
     // thread would otherwise take back with every thread what the renice gave

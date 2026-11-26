@@ -702,6 +702,14 @@ const MAIN_TASKS: &[Task] = &[
         run: |_, args| test_linuxd(args),
     },
     Task {
+        name: "test-refused-fork",
+        help_at: 202,
+        help: &[
+            "test-refused-fork  Boot --personality user --init <busybox> with checks: ring 0 refuses one fork's process (ferrix.check_refuse_process), and the program reads EAGAIN (F-129).",
+        ],
+        run: |_, args| test_refused_fork(args),
+    },
+    Task {
         name: "test-shell",
         help_at: 210,
         help: &[
@@ -853,6 +861,36 @@ fn test_kaslr(args: &Args) -> Result<()> {
 /// Verifies: L.init.1
 /// `cargo xtask test-linuxd --personality user`: milestone 2 of the lift. The
 /// built-in program's `write` and `exit`, through linuxd.
+/// F-129's row: one image, its check-only boot word its own (ledger 10775 X1).
+fn test_refused_fork(args: &Args) -> Result<()> {
+    if flags::this_run()?.value("checks") != Some("on") {
+        return Err(Error::new(
+            "test-refused-fork needs a kernel built with checks=on: its refusal is check-only",
+        ));
+    }
+    let init = args
+        .init
+        .as_deref()
+        .ok_or_else(|| Error::new("test-refused-fork needs --init <busybox>"))?;
+    for arch in args.arches()? {
+        let loader = cargo::build_loader(arch, args.release)?;
+        let natives = native::build(arch, args.release)?;
+        let busybox = program_for(init, arch)?;
+        let kernel = cargo::build_kernel_with_init(
+            arch,
+            args.release,
+            &busybox,
+            shell::REFUSED_FORK_SCRIPT,
+        )?;
+        let carried = shell::refused_fork_carried(&busybox)?;
+        let initramfs = initramfs::build(None, &natives, None, &carried)?;
+        let line = format!("{}\n", shell::REFUSED_FORK_OPTION);
+        let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, Some(&line))?;
+        qemu::test_refused_fork(arch, &image, &kernel, args)?;
+    }
+    Ok(())
+}
+
 fn test_linuxd(args: &Args) -> Result<()> {
     if flags::this_run()?.value("personality") != Some("user") {
         return Err(Error::new("test-linuxd is for --personality user"));

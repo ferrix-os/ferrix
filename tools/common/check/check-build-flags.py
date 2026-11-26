@@ -451,6 +451,8 @@ def settable_problems(registry: dict, profiles: dict[str, dict]) -> list[str]:
     read of it."""
     problems = []
     for name, entry in sorted(registry.items()):
+        if entry.get("rows_only") and not entry.get("test_only"):
+            problems.append(f"boot option {name} is rows-only and not test-only")
         if not entry.get("settable"):
             continue
         if entry.get("test_only"):
@@ -459,6 +461,12 @@ def settable_problems(registry: dict, profiles: dict[str, dict]) -> list[str]:
             problems.append(f"boot option {name} is settable and takes any word (`*`)")
     for name, profile in sorted(profiles.items()):
         permits = profile.get("boot_options", {})
+        # A `rows_only` word is one row's, never an image's: no profile permits it, at any
+        # level (F-129's ferrix.check_refuse_process, ledger 10859 K3). Every rows_only
+        # word is test_only too.
+        for option in sorted(permits):
+            if registry.get(option, {}).get("rows_only"):
+                problems.append(f"profiles/{name}.toml permits the rows-only boot option {option}")
         if "ferrix.badframes" in permits and profile.get("image", {}).get("bad_frames") != "choice":
             problems.append(f"profiles/{name}.toml permits ferrix.badframes, but its bad_frames is not choice")
     return problems
@@ -679,13 +687,18 @@ def self_test() -> list[str]:
             failures.append(f"the image-key rule passed {what}")
     registry = {"ferrix.badframes": {"values": ["persist", "reset", "off"], "settable": True},
                 "t": {"values": ["a"], "settable": True, "test_only": True},
+                "r": {"values": ["*"], "test_only": True, "rows_only": True},
+                "q": {"values": ["*"], "rows_only": True},
                 "w": {"values": ["*"], "settable": True}}
     found = settable_problems(registry, {
         "desktop": {"image": {"bad_frames": "choice"}, "boot_options": {"ferrix.badframes": ["off"]}},
         "present": {"image": {"bad_frames": "persist"}, "boot_options": {"ferrix.badframes": ["off"]}},
+        "fast": {"image": {}, "boot_options": {"r": ["*"]}},
     })
     for expect in ["t is settable and test-only", "w is settable and takes any word",
-                   "present.toml permits ferrix.badframes"]:
+                   "present.toml permits ferrix.badframes",
+                   "fast.toml permits the rows-only boot option r",
+                   "q is rows-only and not test-only"]:
         if not any(expect in p for p in found):
             failures.append(f"the settable rule missed: {expect}")
     if any("desktop" in p for p in found):

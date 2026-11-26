@@ -22,9 +22,9 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Product functions | Count |
 |---|---:|
 | Named by a low-level requirement | 3606 |
-| Accessors, covered by the requirement they serve | 1589 |
+| Accessors, covered by the requirement they serve | 1591 |
 | Check code in a product file | 133 |
-| Named by none | 1223 |
+| Named by none | 1225 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `ferrix_boot_policy`, `ferrix_sha256`, `ferrix_sigverify`, `ferrix_slots`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -2530,7 +2530,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|---|
-| `L.init.1` | run shall start pid 1 from the file ferrix.init= names when it starts, else run the commands input, else start the program input with sh -c and the script input or sh -i, else start /sbin/init. | test-shell's boot starts its program input with `sh -c` and its script, test-vfs's runs its command list, and test-init's starts the file ferrix.init names. | H.BOOT.15 | `init::run`, `init::run_built_in`, `init::run_default`, `init::run_file`, `init::run_commands` | `tools/common/xtask/src/init.rs::test_init`, `tools/common/xtask/src/main.rs::test_linuxd`, `tools/common/xtask/src/main.rs::test_vfs` | xtask gate | xtask gate | xtask gate |
+| `L.init.1` | run shall start pid 1 from the file ferrix.init= names when it starts, else run the commands input, else start the program input with sh -c and the script input or sh -i, else start /sbin/init. | test-shell's boot starts its program input with `sh -c` and its script, test-vfs's runs its command list, and test-init's starts the file ferrix.init names. | H.BOOT.15 | `init::run`, `init::run_built_in`, `init::run_default`, `init::run_file`, `init::run_commands` | `tools/common/xtask/src/init.rs::test_init`, `tools/common/xtask/src/main.rs::test_refused_fork`, `tools/common/xtask/src/main.rs::test_vfs` | xtask gate | xtask gate | xtask gate |
 | `L.init.2` | set_inputs shall take pid 1's program, script and commands only from the boot initramfs's regular entries .ferrix/init/program, .ferrix/init/script and .ferrix/init/commands, once, an input the archive does not carry being empty. | All three entries give all three inputs, none gives three empty ones, and a second set_inputs is refused and leaves the inputs as they were (the `inputs` line). | H.BOOT.15 | `init::set_inputs`, `init::inputs` | `src/kernel/src/init_check.rs::check` | reached | not built | not built |
 | `L.init.3` | judge shall refuse, with a line naming the entry and why, a second entry of an input's name, an input that is not a regular file or has more than one link, any other name under .ferrix, a script holding a NUL and a command list not ending in two NULs, and take that input as absent. | Each of seven malformed sets of entries is refused once and gives the inputs set_inputs says, the rest taken as given (the `inputs` line). | H.BOOT.15 | `init::judge`, `init::refuse` | `src/kernel/src/init_check.rs::check` | reached | not built | not built |
 | `L.init.5` | set_inputs shall keep a copy of each input it takes, so that pid 1's inputs are unchanged by the archive's release and none of them lies in its pages. | Across the release, the inputs' fingerprint is unchanged and none of their bytes lies in the archive's range, on every boot whose checks run (the `release` line). | H.BOOT.15 | `init::set_inputs`, `init::keep` | `src/kernel/extensions/personality/linux/src/fs/release_check.rs::run` | not built | not built | not built |
@@ -3953,7 +3953,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/machine_check.rs::test_mode` | gate | L.x86_64.228 |
 | `tools/common/xtask/src/machine_check.rs::test_mode` | gate | L.x86_64.230 |
 | `tools/common/xtask/src/machine_check.rs::test_mode` | gate | L.x86_64.231 |
-| `tools/common/xtask/src/main.rs::test_linuxd` | gate | L.init.1 |
+| `tools/common/xtask/src/main.rs::test_refused_fork` | gate | L.init.1 |
 | `tools/common/xtask/src/main.rs::test_vfs` | gate | L.init.1 |
 | `tools/common/xtask/src/mce_cmci.rs::test_cmci` | gate | L.x86_64.223 |
 | `tools/common/xtask/src/mce_cmci.rs::test_cmci` | gate | L.x86_64.249 |

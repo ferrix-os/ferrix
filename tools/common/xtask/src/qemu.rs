@@ -1824,6 +1824,47 @@ pub(crate) fn test_lift_script(arch: Arch, image: &Path, kernel: &Path, args: &A
     Ok(())
 }
 
+/// F-129's row, by [`crate::shell::REFUSED_FORK_SCRIPT`]: a fork whose ring-0 process is
+/// refused reaches the forking program as `EAGAIN`, and leaves nothing.
+pub(crate) fn test_refused_fork(
+    arch: Arch,
+    image: &Path,
+    kernel: &Path,
+    args: &Args,
+) -> Result<()> {
+    let watched = watch(arch, image, kernel, args, crate::shell::EXITED)?;
+    let log = watched.log.display();
+    match watched.verdict {
+        Verdict::Reached => {}
+        Verdict::Panicked => return Err(panicked(arch, &watched.log)),
+        Verdict::Silent => {
+            return Err(Error::new(format!(
+                "{arch}: the refused fork's script never ended within {}s.\n  Serial output is in {log}",
+                args.timeout
+            )));
+        }
+    }
+    if let Some(line) = watched
+        .lines
+        .iter()
+        .find(|line| line.contains("refused-fork: F-129: "))
+    {
+        return Err(Error::new(format!(
+            "{arch}: {line}.\n  Serial output is in {log}"
+        )));
+    }
+    let mut remaining = watched.lines.iter();
+    for want in crate::shell::REFUSED_FORK_EXPECTED {
+        if !remaining.any(|line| line.contains(want)) {
+            return Err(Error::new(format!(
+                "{arch}: the refused fork's script is missing `{want}`.\n  Serial output is in {log}"
+            )));
+        }
+    }
+    println!("  {arch}: a fork refused below reached its program as EAGAIN and left nothing");
+    Ok(())
+}
+
 pub(crate) fn test_shell(arch: Arch, image: &Path, kernel: &Path, args: &Args) -> Result<()> {
     println!(
         "  {arch}: running the built-in script under QEMU (timeout {}s)",

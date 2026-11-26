@@ -118,10 +118,52 @@ fn region_in(process: &Process, region: Handle, needed: Rights) -> Result<Arc<Re
     })
 }
 
+/// The call of [`process_create_shared`] refused once, as ring 0 refuses one it has no room
+/// for (F-129's check): `ferrix.check_refuse_process=<N>`, read by `checks::init` in a kernel
+/// with its checks; zero for none. Not in a kernel built `checks=off`.
+#[cfg(ferrix_checks = "on")]
+static REFUSE_AT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// The calls of [`process_create_shared`] so far, for [`REFUSE_AT`].
+#[cfg(ferrix_checks = "on")]
+static CALLS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Have the `at`th call of [`process_create_shared`] refused (F-129's check).
+#[cfg(ferrix_checks = "on")]
+pub(crate) fn refuse_process_at(at: u64) {
+    REFUSE_AT.store(at, core::sync::atomic::Ordering::Release);
+}
+
+/// What [`process_create_shared`] answers before it reads its arguments: [`supported`], and in a
+/// kernel with its checks the one call F-129's check refuses.
+fn may_create() -> Result<(), Errno> {
+    supported()?;
+    #[cfg(ferrix_checks = "on")]
+    if refused_on_purpose() {
+        return Err(status::NO_MEMORY);
+    }
+    Ok(())
+}
+
+/// Whether this call of [`process_create_shared`] is the one [`REFUSE_AT`] names, said if so.
+#[cfg(ferrix_checks = "on")]
+fn refused_on_purpose() -> bool {
+    use core::sync::atomic::Ordering;
+    let call = CALLS.fetch_add(1, Ordering::AcqRel) + 1;
+    let refused = call == REFUSE_AT.load(Ordering::Acquire);
+    if refused {
+        crate::console::println!(
+            "  region   process_create_shared's call {call} refused, as \
+             ferrix.check_refuse_process asks (F-129's check)"
+        );
+    }
+    refused
+}
+
 /// `process_create_shared`: `(region, job, space, name, name_length,
 /// *out_space) -> process`.
 fn process_create_shared(process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
-    supported()?;
+    may_create()?;
     let [region, job, space, name, name_length, out_space] = *a;
     let region = region_in(process, handle(region), Rights::MANAGE)?;
     let job = job_in(process, handle(job), Rights::MANAGE)?;
