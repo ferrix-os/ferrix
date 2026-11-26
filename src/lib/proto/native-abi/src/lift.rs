@@ -64,7 +64,8 @@ pub struct BootPage {
     pub processors: u32,
     /// The frames linuxd may hold, its arena's size in use: what the kernel
     /// could give it at its start, so a program's memory runs out here, where the
-    /// load's reclaim and OOM answer, before the kernel's does.
+    /// load's reclaim and OOM answer, before the kernel's does. [`ARENA_KEPT_FRAMES`]
+    /// of it no program's page takes.
     pub memory_frames: u64,
     /// The channel `netd` opens this partition's rings on; 0 with no `devmgr`.
     pub net_cores: u64,
@@ -73,6 +74,12 @@ pub struct BootPage {
     /// The time of day firmware gave at boot, in nanoseconds since the epoch; 0 for none.
     pub wall_clock: u64,
 }
+
+/// Frames of linuxd's arena a program's page never takes: linuxd's own heap is
+/// on the same pool, and a section the load entered on `reserve` allocates
+/// without being able to refuse (16 MiB). The kernel counts them when it sizes
+/// the arena under `kernel_memory=retyped` (`docs/microkernel/K16.md`, R.5).
+pub const ARENA_KEPT_FRAMES: u64 = 16 << 20 >> 12;
 
 /// Where in the boot page the command line starts.
 pub const COMMAND_LINE_AT: usize = 256;

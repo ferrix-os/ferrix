@@ -702,6 +702,15 @@ impl fmt::Display for InitError {
     }
 }
 
+impl InitError {
+    /// Whether the root ran out of memory: tmpfs answers a write it has no
+    /// frame for with `ENOSPC`, as Linux's does, so an unpack that stops there
+    /// stopped for want of memory and says so (ledger 10111 C2, 10128 Y7).
+    pub fn for_want_of_memory(&self) -> bool {
+        matches!(self, InitError::Unpack(UnpackError::Entry { errno, .. }) if *errno == Errno::ENOSPC)
+    }
+}
+
 /// Build the root: unpack the initramfs, if there is one, and mount `/tmp`
 /// and the kernel's own filesystems.
 ///

@@ -659,6 +659,22 @@ pub(crate) fn check_one_slice(job: &Job) {
     }
 }
 
+/// Under `kernel_memory=retyped` the boot holds one drivers' promise: a job beside
+/// `drivers.slice` held a second 64 MiB nobody drew, which left linuxd's arena
+/// short (F-121, n27b-diag640c). Asked by `devmgr::devmgr_job` beside
+/// [`check_one_slice`], every checked retyped boot; it stops the boot by name.
+///
+/// Verifies: L.object.348
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub(crate) fn check_one_promise() {
+    if devmgr::drivers_promised() != 1 {
+        fatal!(
+            catalog::STAGE10_DEVMGR,
+            "the drivers hold more than one promise"
+        );
+    }
+}
+
 /// `drivers.slice`, once what starts it has run.
 pub fn stage_drivers_sealed() {
     if !crate::checks::run() {

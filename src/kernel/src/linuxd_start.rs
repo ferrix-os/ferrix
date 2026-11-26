@@ -127,11 +127,25 @@ fn write_devices(page: &Arc<Vmo>) -> Result<u32, &'static str> {
     Ok(written)
 }
 
+#[cfg(ferrix_kernel_memory = "retyped")]
+use crate::boot_authority::PromiseCheck;
+/// The check of linuxd's promise (L.object.343), which the composition root hands in:
+/// product code names no check.
+#[cfg(ferrix_kernel_memory = "retyped")]
+static PROMISE_CHECK: ferrix_sync::Once<PromiseCheck> = ferrix_sync::Once::new();
+
+/// Hand in the promise's check, before linuxd starts (`boot_authority::set_promise_check`).
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub(crate) fn set_promise_check(check: PromiseCheck) {
+    let _ = PROMISE_CHECK.call_once(|| check);
+}
+
 /// K16 §4: the partition's memory is a promise, its kernel objects and its arena alike.
 /// What is left over is the pool's, the watermark's and the kernel's own; a further
-/// partition's is its own row's, and is taken out first. Answers the frames promised.
+/// partition's is its own row's, and is taken out first. Answers what the admission
+/// allowed and, seven eighths of it, the frames promised.
 #[cfg(ferrix_kernel_memory = "retyped")]
-fn promise_for_partition(partition: &job::Job) -> Result<u64, &'static str> {
+fn promise_for_partition(partition: &job::Job) -> Result<(u64, u64), &'static str> {
     // What can be promised at all, which the allocator knows and says: an eighth stays
     // for the pool and what the kernel asks at a job's expense, and further partition
     // rows have been promised by their own starts, above.
@@ -146,6 +160,7 @@ fn promise_for_partition(partition: &job::Job) -> Result<u64, &'static str> {
         }
         promised = promised.saturating_sub(short);
     }
+    let admitted = promised;
     promised = promised / 8 * 7;
     partition
         .set_reservation(promised * PAGE_SIZE)
@@ -153,7 +168,65 @@ fn promise_for_partition(partition: &job::Job) -> Result<u64, &'static str> {
             println!("  linuxd   no reservation of {promised} frames: {why:?}");
             "no reservation for the partition"
         })?;
-    Ok(promised)
+    Ok((admitted, promised))
+}
+
+/// The first partition's region, after its first promise under `retyped`: what the kernel
+/// makes at the partition's expense from here to the initramfs's return (its region,
+/// linuxd's image, their tables) is charged inside a promise; [`size_the_arena`] takes it
+/// again once the initramfs is back.
+fn region_for(partition: &Arc<job::Job>) -> Result<Arc<Region>, &'static str> {
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    let _ = promise_for_partition(partition)?;
+    Region::new(Arc::clone(partition)).map_err(|_| "no memory for a region")
+}
+
+/// K16 §4.1 (`docs/microkernel/K16.md`): linuxd's arena, sized from the partition's
+/// promise taken again once the initramfs is given back, held to that order and size
+/// under checks (L.object.343), and a machine whose arena would not hold linuxd's root and
+/// its programs refused by name before linuxd runs (L.object.345). Answers the arena's
+/// frames.
+///
+/// # Errors
+///
+/// The initramfs not given back (a caller that may not block, nothing held): the
+/// promise counts on its frames, so that is the start's error by name.
+#[cfg(ferrix_kernel_memory = "retyped")]
+fn size_the_arena(partition: &Arc<job::Job>, archive_len: u64) -> Result<u64, &'static str> {
+    let _given = crate::mm::give_back_initrd()
+        .ok_or("the initramfs could not be given back before linuxd's promise")?;
+    // What the initramfs held is free now, and the partition's. The first promise was
+    // taken while it was held, so its frames came back outside every promise, where
+    // nothing of linuxd's can draw them (n27b-diag640c: 31837 frames, 124 MiB, of a 640 MiB
+    // machine; ledger 7011 R.2).
+    let held_at_promise = crate::mm::with_initrd(|_| ()).is_some();
+    let (admitted, promised) = promise_for_partition(partition)?;
+    // The arena's size: seven eighths of the reservation, so 49/64 of what could be
+    // promised, by design (ledger 7145 (f)). The promise's own eighth, taken in
+    // `promise_for_partition`, is the pool's and the kernel's; this eighth stays inside the
+    // partition's reservation for what the kernel makes at its expense there -- the arena's
+    // page tables (a frame for each 512 mapped, and the levels above), the region and the
+    // boot page, the kernel heap of its objects (K12b) -- so that the arena, given whole,
+    // leaves room in the reservation for them. Not measured: an eighth is the conservative
+    // side of what they take.
+    let memory_frames = promised / 8 * 7;
+    let needed = crate::mm::seal::arena_needed(archive_len);
+    println!("  linuxd   promised {promised} frames, its arena {memory_frames}, {needed} needed");
+    if crate::checks::run()
+        && let Some(check) = PROMISE_CHECK.get()
+    {
+        check(partition, held_at_promise, (admitted, memory_frames));
+    }
+    // R.5: a machine too small for this partition stops here, before linuxd runs and its
+    // root's unpack would run out half way (L.object.345).
+    if crate::mm::seal::arena_refused(memory_frames, archive_len) {
+        crate::panic::fatal!(
+            crate::panic::catalog::RETYPED,
+            "the machine is too small for kernel_memory=retyped: linuxd's arena of \
+             {memory_frames} frames is under the {needed} its root and programs need"
+        );
+    }
+    Ok(memory_frames)
 }
 
 /// What linuxd's boot page says, its handles given as they are named.
@@ -282,30 +355,23 @@ fn start(
             println!("  linuxd {} did not start: {why}", index + 1);
         }
     }
-    #[cfg(ferrix_kernel_memory = "retyped")]
-    let promised = promise_for_partition(&partition)?;
     if !further.is_empty() {
         println!(
             "  linuxd   the first partition's speculation domain: {}",
             partition.domain()
         );
     }
-    let region = Region::new(Arc::clone(&partition)).map_err(|_| "no memory for a region")?;
+    let region = region_for(&partition)?;
     let entry = crate::mm::with_initrd(|archive| load(region.space(), archive, PATH))
         .ok_or("no initramfs")??;
+    // Under `retyped` the arena is sized from a promise taken once the initramfs is back
+    // ([`size_the_arena`]); without it there is no reservation, and seven eighths of the
+    // free count is all.
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    let memory_frames = size_the_arena(&partition, archive_len)?;
+    #[cfg(not(ferrix_kernel_memory = "retyped"))]
     let _ = crate::mm::give_back_initrd();
     let page = Vmo::new_anonymous(1).map_err(|_| "no memory for the boot page")?;
-    // The arena's size: under `retyped` seven eighths of the reservation, so 49/64 of what
-    // could be promised, by design (ledger 7145 (f)). The promise's own eighth, taken in
-    // `promise_for_partition`, is the pool's and the kernel's; this eighth stays inside the
-    // partition's reservation for what the kernel makes at its expense there -- the arena's
-    // page tables (a frame for each 512 mapped, and the levels above), the region and the
-    // boot page, the kernel heap of its objects (K12b) -- so that the arena, given whole,
-    // leaves room in the reservation for them. Not measured: an eighth is the conservative
-    // side of what they take. Without `retyped` there is no reservation, and the one
-    // eighth of the free count is all.
-    #[cfg(ferrix_kernel_memory = "retyped")]
-    let memory_frames = promised / 8 * 7;
     #[cfg(not(ferrix_kernel_memory = "retyped"))]
     let memory_frames = crate::mm::free_frames() / 8 * 7;
     let boot = boot_page(

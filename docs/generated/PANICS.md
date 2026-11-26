@@ -136,6 +136,7 @@ Causes are listed most likely first.
 | [FX-0952](#fx-0952) | a first process did not start |
 | [FX-0953](#fx-0953) | the partitions' description cannot be honoured |
 | [FX-0954](#fx-0954) | the partition manager ended |
+| [FX-0955](#fx-0955) | linuxd's memory could not be promised as K16 asks |
 | [FX-0970](#fx-0970) | a time reservation did not behave as the scheduler promises |
 | [FX-0972](#fx-0972) | a boot check on a worker did not run to its end |
 | [FX-0973](#fx-0973) | a reclaim began inside a reclaim |
@@ -3305,6 +3306,26 @@ authority, so this is the machine's safe state, a clean exit included.
 See: src/user/system/native/partmgr/src/main.rs;
 docs/microkernel/BOOT-AUTHORITY.md.
 
+<a id="fx-0955"></a>
+
+## FX-0955 — linuxd's memory could not be promised as K16 asks
+
+Under `kernel_memory=retyped` linuxd's partition runs on a promise of frames,
+and linuxd's arena, where every Linux program's memory is, is seven eighths of
+it, fixed at linuxd's start. The promise is taken once the initramfs is given
+back, as large as the reservation's admission allows, and a machine whose arena
+would not hold linuxd's root and its programs is refused here rather than
+failing half way through the root's unpack or a program's load.
+
+1. The machine is too small for this profile: its memory is under the minimum
+   `docs/microkernel/K16.md` states for each architecture.
+2. The promise was taken before the initramfs came back, or short of what was
+   free: `linuxd_start::start`'s order changed.
+3. The arena was sized from something other than the promise.
+
+See: src/kernel/src/linuxd_start.rs; src/kernel/src/mm/seal.rs;
+docs/microkernel/K16.md.
+
 <a id="fx-0970"></a>
 
 ## FX-0970 — a time reservation did not behave as the scheduler promises
@@ -3680,6 +3701,8 @@ whose driver died. The boot's block drivers come from it from then on.
    device up, or the kernel never sent PUBLISHED for a disk it accepted.
 5. devmgr would have been started in a job other than `drivers.slice`:
    `devmgr::drivers_job` made a job beside the slice it keeps (F-121).
+6. Under `kernel_memory=retyped` the drivers hold a second promise:
+   `devmgr::drivers_job` promised a second job its 64 MiB.
 
 See: src/kernel/src/discovery/devmgr.rs;
 src/user/system/native/devmgr/src/main.rs; docs/DEVMGR.md; docs/ROADMAP.md stage

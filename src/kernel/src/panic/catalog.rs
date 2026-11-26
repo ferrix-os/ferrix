@@ -2464,6 +2464,8 @@ pub static STAGE10_DEVMGR: Explanation = Explanation {
          or the kernel never sent PUBLISHED for a disk it accepted.",
         "devmgr would have been started in a job other than `drivers.slice`: \
          `devmgr::drivers_job` made a job beside the slice it keeps (F-121).",
+        "Under `kernel_memory=retyped` the drivers hold a second promise: \
+         `devmgr::drivers_job` promised a second job its 64 MiB.",
     ],
     see: "src/kernel/src/discovery/devmgr.rs; src/user/system/native/devmgr/src/main.rs; docs/DEVMGR.md; docs/ROADMAP.md \
           stage 10",
@@ -4390,6 +4392,27 @@ pub static PARTITION_MANAGER_ENDED: Explanation = Explanation {
     see: "src/user/system/native/partmgr/src/main.rs; docs/microkernel/BOOT-AUTHORITY.md",
 };
 
+/// K16 (`docs/microkernel/K16.md`): linuxd's memory under `kernel_memory=retyped`, its
+/// promise held to its order and size, or a machine too small for it.
+pub static RETYPED: Explanation = Explanation {
+    code: "FX-0955",
+    title: "linuxd's memory could not be promised as K16 asks",
+    meaning: "Under `kernel_memory=retyped` linuxd's partition runs on a promise of frames, and \
+              linuxd's arena, where every Linux program's memory is, is seven eighths of it, \
+              fixed at linuxd's start. The promise is taken once the initramfs is given back, as \
+              large as the reservation's admission allows, and a machine whose arena would not \
+              hold linuxd's root and its programs is refused here rather than failing half way \
+              through the root's unpack or a program's load.",
+    causes: &[
+        "The machine is too small for this profile: its memory is under the minimum \
+         `docs/microkernel/K16.md` states for each architecture.",
+        "The promise was taken before the initramfs came back, or short of what was free: \
+         `linuxd_start::start`'s order changed.",
+        "The arena was sized from something other than the promise.",
+    ],
+    see: "src/kernel/src/linuxd_start.rs; src/kernel/src/mm/seal.rs; docs/microkernel/K16.md",
+};
+
 /// For the watchdog (`watchdog.rs`): user space stopped feeding
 /// `/dev/watchdog` within the timeout its opener set.
 pub(crate) static WATCHDOG_STARVED: Explanation = Explanation {
@@ -4591,6 +4614,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &FIRST_PROCESSES,
     &PARTITION_DESCRIPTION,
     &PARTITION_MANAGER_ENDED,
+    &RETYPED,
     &SCHEDULE_EDF,
     #[cfg(not(ferrix_shape = "micro"))]
     &BOOT_CHECK_WORKER,

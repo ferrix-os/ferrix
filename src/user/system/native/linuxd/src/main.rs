@@ -234,8 +234,13 @@ fn served(_argument: usize) {
     match fs::init(&view) {
         Ok(_) => console::write_bytes(b"  linuxd   root built\n"),
         Err(why) => {
+            let memory = if why.for_want_of_memory() {
+                ", for want of memory: linuxd's arena is full"
+            } else {
+                ""
+            };
             console::write(format_args!(
-                "  linuxd   the root could not be built: {why:?}\n"
+                "  linuxd   the root could not be built{memory}: {why:?}\n"
             ));
             return;
         }

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "f8f48072f98fbb3988dcf06059df59fb3dc6d413c3f3e4662148346fcfdaec30",
+  "digest": "b1cb754f72bf934e6593e3f5f933ec5af3e4516d3ffd21e44ed3fae06b5895f3",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 168,
-    "elements": 10495,
+    "elements": 10513,
     "maturity": {
       "implemented": 296,
       "inProgress": 23,
@@ -47237,10 +47237,10 @@
                   "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"user::edge_check's copy case: every variant of SpaceError and of VmoError, each named with no wildcard in the mapping, answers NoMemory for want of a frame and Fault otherwise, and a copy to an address never mapped reads Fault; object::quota_check's memory case: a copy as a task of a job at its memory limit, into the first page refused, reads NoMemory.\"",
+                  "value": "\"user::edge_check's copy case: every variant of SpaceError and of VmoError answers as the check's copy_answer, which names each with no wildcard, says: NoMemory for want of a frame and Fault otherwise; and a copy to an address never mapped reads Fault; object::quota_check's memory case: a copy as a task of a job at its memory limit, into the first page refused, reads NoMemory.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4173
+                    "line": 4174
                   }
                 },
                 {
@@ -47251,7 +47251,7 @@
                   "value": "\"H.QUOTA.2\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4174
+                    "line": 4175
                   }
                 },
                 {
@@ -47262,293 +47262,497 @@
                   "value": "\"syscall::uaccess::UserError::from\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4175
+                    "line": 4176
+                  }
+                }
+              ]
+            },
+            {
+              "name": "linuxdsPromiseIsTakenWhenTheRootIsBack",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::linuxdsPromiseIsTakenWhenTheRootIsBack",
+              "kind": "requirement",
+              "shortName": "L.object.343",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4178
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::linuxdsPromiseIsTakenWhenTheRootIsBack",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"linuxd's arena shall be sized from a promise taken after the initramfs is given back, as large as the reservation's admission allows then.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4180
                   }
                 },
                 {
-                  "name": "theDriversRunInTheirSlice",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
-                  "kind": "requirement",
-                  "shortName": "L.object.344",
-                  "type": "ItemLowLevel",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4176
-                  },
-                  "children": [
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
-                      "kind": "attribute",
-                      "redefines": "statement",
-                      "value": "\"devmgr shall be started in drivers.slice, the one job a boot makes of that name, on the kernel's path and on a user kernel's.\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4178
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
-                      "kind": "attribute",
-                      "redefines": "criterion",
-                      "value": "\"syscall::rehome_check::check_one_slice, asked by devmgr_job on every checked boot that starts devmgr: the job is drivers.slice; its control, the kept slice not answered, FIRED on a user kernel on x86_64 KVM and AArch64 TCG (n27b-s-ctl-x86, n27b-s-ctl-a64).\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4181
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
-                      "kind": "attribute",
-                      "redefines": "parent",
-                      "value": "\"H.OBJ.22\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4182
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
-                      "kind": "attribute",
-                      "redefines": "unit",
-                      "value": "(\"discovery::devmgr::drivers_job\", \"discovery::devmgr::devmgr_job\")",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4183
-                      }
-                    }
-                  ]
-                },
-                {
-                  "name": "aFurtherPartitionHoldsItsRow",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
-                  "kind": "requirement",
-                  "shortName": "L.object.346",
-                  "type": "ItemLowLevel",
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::linuxdsPromiseIsTakenWhenTheRootIsBack",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"mm::seal_check::check_linuxd_promise on every checked retyped boot: the initramfs was not held at the promise, the admission refuses the promise 256 frames more (the check's resolution: frames another processor gives back between the promise and the check can widen what it admits by less than that, so it judges \"not less\"), and the arena is seven eighths of the entry; its control, the promise taken again above the initramfs's return, FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 4185
-                  },
-                  "children": [
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
-                      "kind": "attribute",
-                      "redefines": "statement",
-                      "value": "\"A further Linux partition shall be started in a job and a region of its own with the FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4187
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
-                      "kind": "attribute",
-                      "redefines": "criterion",
-                      "value": "\"test-partitions: a second partition runs programs and ends, and one that dies at once, the first going on; Rows::judge at its start; the first's end ends the machine, shown.\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4189
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
-                      "kind": "attribute",
-                      "redefines": "parent",
-                      "value": "\"H.DEV.13\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4190
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
-                      "kind": "attribute",
-                      "redefines": "unit",
-                      "value": "\"linuxd_start::start_further\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4191
-                      }
-                    }
-                  ]
+                  }
                 },
                 {
-                  "name": "eachPartitionASpeculationDomain",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
-                  "kind": "requirement",
-                  "shortName": "L.object.347",
-                  "type": "ItemLowLevel",
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::linuxdsPromiseIsTakenWhenTheRootIsBack",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.32\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4193
-                  },
-                  "children": [
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
-                      "kind": "attribute",
-                      "redefines": "statement",
-                      "value": "\"With more than one Linux partition, each shall be a speculation domain of its own.\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4194
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
-                      "kind": "attribute",
-                      "redefines": "criterion",
-                      "value": "\"test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED.\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4195
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
-                      "kind": "attribute",
-                      "redefines": "parent",
-                      "value": "\"H.DEV.13\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4196
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
-                      "kind": "attribute",
-                      "redefines": "unit",
-                      "value": "\"linuxd_start::start\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4197
-                      }
-                    }
-                  ]
+                    "line": 4186
+                  }
                 },
                 {
-                  "name": "aHeapChargeReclaimsFirst",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
-                  "kind": "requirement",
-                  "shortName": "L.object.370",
-                  "type": "ItemLowLevel",
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::linuxdsPromiseIsTakenWhenTheRootIsBack",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"linuxd_start::size_the_arena\", \"linuxd_start::region_for\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4199
-                  },
-                  "children": [
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
-                      "kind": "attribute",
-                      "redefines": "statement",
-                      "value": "\"A kernel-heap charge refused at a job's memory limit, made for the running task's own job where it may block and not inside a reclaim, shall first reclaim clean cache charged to the job whose limit is full or beneath it and then be tried once more. In linuxd (the lift) such a charge shall be refused without a reclaim, as before: the lift's may_block answers yes whatever is held, so the charge could not tell a context holding a spin lock from one holding none.\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4206
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
-                      "kind": "attribute",
-                      "redefines": "criterion",
-                      "value": "\"test-container's heap-reclaim step: at memory.max beside the cgroup's file cache, 128 opens of memory.events held and a read given, pgscan moving, and the file's own mapping reading as before once its pages were taken down and filled again; with the reclaim taken out the step fails on its refusal sentence (mki3f-c1, FIRED).\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4211
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
-                      "kind": "attribute",
-                      "redefines": "parent",
-                      "value": "\"H.QUOTA.7\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4212
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
-                      "kind": "attribute",
-                      "redefines": "unit",
-                      "value": "(\"object::quota::KernelHeap::charge\", \"object::oom::reclaim_within\", \"sched::heap_charge_may_reclaim\")",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4214
-                      }
-                    }
-                  ]
+                    "line": 4187
+                  }
                 },
                 {
-                  "name": "aReclaimNeverNests",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
-                  "kind": "requirement",
-                  "shortName": "L.object.371",
-                  "type": "ItemLowLevel",
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::linuxdsPromiseIsTakenWhenTheRootIsBack",
+                  "kind": "attribute",
+                  "redefines": "scope",
+                  "value": "\"kernel_memory=retyped\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4188
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theDriversRunInTheirSlice",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversRunInTheirSlice",
+              "kind": "requirement",
+              "shortName": "L.object.344",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4190
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversRunInTheirSlice",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"devmgr shall be started in drivers.slice, the one job a boot makes of that name, on the kernel's path and on a user kernel's.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4192
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversRunInTheirSlice",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"syscall::rehome_check::check_one_slice, asked by devmgr_job on every checked boot that starts devmgr: the job is drivers.slice; its control, the kept slice not answered, FIRED on a user kernel on x86_64 KVM and AArch64 TCG (n27b-s2-ctl-x86, n27b-s2-ctl-a64).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4195
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversRunInTheirSlice",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.OBJ.22\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4196
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversRunInTheirSlice",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"discovery::devmgr::drivers_job\", \"discovery::devmgr::devmgr_job\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4197
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aMachineTooSmallIsRefusedByName",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::aMachineTooSmallIsRefusedByName",
+              "kind": "requirement",
+              "shortName": "L.object.345",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4199
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aMachineTooSmallIsRefusedByName",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A machine whose linuxd arena would not hold linuxd's root and its programs shall be refused before linuxd runs, with FX-0955 and a line that says the machine is too small for kernel_memory=retyped.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4202
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aMachineTooSmallIsRefusedByName",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"mm::seal_check::check_arena_refusal: an arena one frame under what the root and programs need is refused and one of exactly that is not; and a machine one step under the stated minimum reads the line and ends with FX-0955, on x86_64 and AArch64 (docs/microkernel/K16.md §4.1).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4205
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aMachineTooSmallIsRefusedByName",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.32\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4206
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aMachineTooSmallIsRefusedByName",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"mm::seal::arena_refused\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4207
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aMachineTooSmallIsRefusedByName",
+                  "kind": "attribute",
+                  "redefines": "scope",
+                  "value": "\"kernel_memory=retyped\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4208
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theDriversHoldOnePromise",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversHoldOnePromise",
+              "kind": "requirement",
+              "shortName": "L.object.348",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4210
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversHoldOnePromise",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Under kernel_memory=retyped the drivers shall hold one promise, their slice's.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4211
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversHoldOnePromise",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"syscall::rehome_check::check_one_promise, asked by devmgr_job on every checked retyped boot: drivers_job made one promise; its control, a second promise made, FIRED.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4213
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversHoldOnePromise",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.MEM.32\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4214
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversHoldOnePromise",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"discovery::devmgr::drivers_job\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4215
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::theDriversHoldOnePromise",
+                  "kind": "attribute",
+                  "redefines": "scope",
+                  "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 4216
-                  },
-                  "children": [
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
-                      "kind": "attribute",
-                      "redefines": "statement",
-                      "value": "\"A reclaim begun inside a reclaim of the same task shall stop the machine (FX-0973).\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4218
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
-                      "kind": "attribute",
-                      "redefines": "criterion",
-                      "value": "\"With KernelHeap's guard taken out and a refused charge planted at the head of the reclaim, test-container stops as FX-0973, 'a reclaim began inside a reclaim' (mki3f-c2, FIRED).\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4221
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
-                      "kind": "attribute",
-                      "redefines": "parent",
-                      "value": "\"H.QUOTA.7\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4222
-                      }
-                    },
-                    {
-                      "name": "",
-                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
-                      "kind": "attribute",
-                      "redefines": "unit",
-                      "value": "\"user::cache::reclaim\"",
-                      "source": {
-                        "file": "docs/sysml/14-object-requirements.sysml",
-                        "line": 4223
-                      }
-                    }
-                  ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aFurtherPartitionHoldsItsRow",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
+              "kind": "requirement",
+              "shortName": "L.object.346",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4218
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A further Linux partition shall be started in a job and a region of its own with the FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4220
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"test-partitions: a second partition runs programs and ends, and one that dies at once, the first going on; Rows::judge at its start; the first's end ends the machine, shown.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4222
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.13\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4223
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"linuxd_start::start_further\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4224
+                  }
+                }
+              ]
+            },
+            {
+              "name": "eachPartitionASpeculationDomain",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
+              "kind": "requirement",
+              "shortName": "L.object.347",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4226
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"With more than one Linux partition, each shall be a speculation domain of its own.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4227
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4228
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.13\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4229
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"linuxd_start::start\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4230
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aHeapChargeReclaimsFirst",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+              "kind": "requirement",
+              "shortName": "L.object.370",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4232
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A kernel-heap charge refused at a job's memory limit, made for the running task's own job where it may block and not inside a reclaim, shall first reclaim clean cache charged to the job whose limit is full or beneath it and then be tried once more. In linuxd (the lift) such a charge shall be refused without a reclaim, as before: the lift's may_block answers yes whatever is held, so the charge could not tell a context holding a spin lock from one holding none.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4239
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"test-container's heap-reclaim step: at memory.max beside the cgroup's file cache, 128 opens of memory.events held and a read given, pgscan moving, and the file's own mapping reading as before once its pages were taken down and filled again; with the reclaim taken out the step fails on its refusal sentence (mki3f-c1, FIRED).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4244
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.7\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4245
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"object::quota::KernelHeap::charge\", \"object::oom::reclaim_within\", \"sched::heap_charge_may_reclaim\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4247
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aReclaimNeverNests",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+              "kind": "requirement",
+              "shortName": "L.object.371",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4249
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A reclaim begun inside a reclaim of the same task shall stop the machine (FX-0973).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4251
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"With KernelHeap's guard taken out and a refused charge planted at the head of the reclaim, test-container stops as FX-0973, 'a reclaim began inside a reclaim' (mki3f-c2, FIRED).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4254
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.7\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4255
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"user::cache::reclaim\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4256
+                  }
                 }
               ]
             }

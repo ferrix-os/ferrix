@@ -81,5 +81,64 @@ pub fn check(promised: &Job, bare: &Job) -> Result<(), &'static str> {
     if kept {
         return Err("a retyped frame went back with its bytes");
     }
+    check_arena_refusal()
+}
+
+/// Frames another processor may give back between linuxd's promise and the check of
+/// it, which would let the admission grant a little more: the check asks for this
+/// many past what was admitted, so it judges "not less" and does not flake.
+const PROMISE_SLACK: u64 = 256;
+
+/// linuxd's promise is taken once the initramfs is given back, as large as the
+/// reservation's own admission allows then, and its arena is made from it
+/// (`docs/microkernel/K16.md`, R.2's sizing; ledger 10128 Y1). Asked by
+/// `linuxd_start` on every checked boot of a `kernel_memory=retyped` kernel, with
+/// whether the initramfs was still held when the promise was taken, what the
+/// admission allowed and the arena it made; it stops the boot by name.
+///
+/// Verifies: L.object.343
+pub fn check_linuxd_promise(job: &Job, held_at_promise: bool, arena_admitted: (u64, u64)) {
+    let (admitted, arena) = arena_admitted;
+    if held_at_promise {
+        crate::panic::fatal!(
+            crate::panic::catalog::RETYPED,
+            "linuxd's promise was taken while the initramfs was held"
+        );
+    }
+    // The admission's own body once more, not a copy of its sum: a promise that took
+    // all it could is refused this much more.
+    let entry = job.draws_from();
+    if !matches!(
+        super::reservation_resize(entry, admitted + PROMISE_SLACK),
+        Err(super::Refused::Short(_))
+    ) {
+        crate::panic::fatal!(
+            crate::panic::catalog::RETYPED,
+            "linuxd's promise was short of what the admission allowed"
+        );
+    }
+    let (size, _) = super::reservation_usage(entry);
+    if arena != size / 8 * 7 {
+        crate::panic::fatal!(
+            crate::panic::catalog::RETYPED,
+            "linuxd's arena was not made from its promise"
+        );
+    }
+}
+
+/// An arena under what linuxd's root and programs need is refused, and one of
+/// exactly that is not: the figures `linuxd_start` refuses a machine by (R.5).
+///
+/// Verifies: L.object.345
+pub(crate) fn check_arena_refusal() -> Result<(), &'static str> {
+    use super::seal::{arena_needed, arena_refused};
+    const ROOT: u64 = 100 << 20;
+    let needed = arena_needed(ROOT);
+    if !arena_refused(needed - 1, ROOT) || arena_refused(needed, ROOT) {
+        return Err("an arena was not refused at exactly what linuxd's root and programs need");
+    }
+    if needed <= ROOT >> 12 {
+        return Err("the arena linuxd needs did not count its root");
+    }
     Ok(())
 }

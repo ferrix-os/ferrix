@@ -1399,6 +1399,17 @@ pub fn published(location: Location) {
 #[cfg(ferrix_kernel_memory = "retyped")]
 const DRIVERS_RESERVATION: u64 = 64 << 20;
 
+/// How many drivers' promises [`drivers_job`] has made: one on a boot that holds
+/// one drivers' job (`syscall::rehome_check::check_one_promise`, L.object.348).
+#[cfg(ferrix_kernel_memory = "retyped")]
+static DRIVERS_PROMISED: AtomicU16 = AtomicU16::new(0);
+
+/// [`DRIVERS_PROMISED`], for the check.
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub(crate) fn drivers_promised() -> u16 {
+    DRIVERS_PROMISED.load(Ordering::Acquire)
+}
+
 /// The name of the job `devmgr` is given, beneath the root job:
 /// `docs/CGROUPS.md` §2.1, and the slice `docs/INIT.md` §5.1 shows drivers in.
 pub(crate) const DRIVERS_JOB: &str = "drivers.slice";
@@ -1433,8 +1444,11 @@ fn drivers_job() -> Result<Arc<Job>, &'static str> {
     job.make_measured();
     // K16 §4: the drivers' kernel objects are theirs (`docs/microkernel/K16.md`).
     #[cfg(ferrix_kernel_memory = "retyped")]
-    job.set_reservation(DRIVERS_RESERVATION)
-        .map_err(|_| "no reservation for the drivers' job")?;
+    {
+        job.set_reservation(DRIVERS_RESERVATION)
+            .map_err(|_| "no reservation for the drivers' job")?;
+        let _ = DRIVERS_PROMISED.fetch_add(1, Ordering::AcqRel);
+    }
     Ok(job)
 }
 
@@ -1448,6 +1462,8 @@ fn devmgr_job() -> Result<Arc<Job>, &'static str> {
     let job = drivers_job()?;
     if crate::checks::run() {
         crate::syscall::rehome_check::check_one_slice(&job);
+        #[cfg(ferrix_kernel_memory = "retyped")]
+        crate::syscall::rehome_check::check_one_promise();
     }
     Ok(job)
 }

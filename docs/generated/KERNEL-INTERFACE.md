@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3121 declarations in the core's files, 215 in the item's; 279 checks-only.
+3125 declarations in the core's files, 217 in the item's; 279 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2197,6 +2197,8 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `arena_needed` | fn | item |  |
+| `arena_refused` | fn | item |  |
 | `note_payer` | fn | item |  |
 | `report` | fn | item |  |
 | `seal_after_boot` | fn | item |  |
@@ -2206,6 +2208,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `check` | fn | bin |  |
+| `check_linuxd_promise` | fn | bin |  |
 
 ### `mmio`
 
@@ -2868,6 +2871,7 @@ checks above is `pub` for raised checks (F3).
 | `PROCESSOR_DISCOVERY` | static | bin |  |
 | `RANDOM_GENERATOR` | static | bin |  |
 | `RELEASE` | static | load (checks) | checks-only |
+| `RETYPED` | static | item |  |
 | `ROOT_PID1` | static | load |  |
 | `SCHEDULER_BRING_UP` | static | bin |  |
 | `SCHEDULE_EDF` | static | bin |  |
@@ -4020,8 +4024,10 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `run` | fn | bin |  |
+| `set_promise_check` | fn | bin |  |
 | `set_region_check` | fn | bin |  |
 | `set_seal_check` | fn | bin |  |
+| `PromiseCheck` | type | - |  |
 | `SealCheck` | type | - |  |
 
 ### `build_flags`

@@ -519,7 +519,7 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1582",
+      "lines": "1598",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."

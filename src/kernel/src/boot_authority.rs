@@ -104,6 +104,18 @@ pub fn set_seal_check(check: SealCheck) {
     let _ = SEAL_CHECK.call_once(|| check);
 }
 
+/// The check of linuxd's promise (L.object.343): whether the initramfs was held at
+/// the promise, then what the admission allowed and the arena made of it.
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub type PromiseCheck = fn(&job::Job, bool, (u64, u64));
+
+/// Hand in the check of linuxd's promise (L.object.343), before [`run`]: the
+/// composition root's way to `linuxd_start`, whose module is the item's own.
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub fn set_promise_check(check: PromiseCheck) {
+    crate::linuxd_start::set_promise_check(check);
+}
+
 /// K16: from here on the shared heap refuses, after the first processes are made and
 /// before they run, and the seal holds itself to its rule (`docs/microkernel/K16.md`).
 #[cfg(ferrix_kernel_memory = "retyped")]

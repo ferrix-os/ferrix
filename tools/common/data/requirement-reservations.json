@@ -34,7 +34,7 @@
     },
     {
       "ids": [
-        "L.object.341", "L.object.343", "L.object.345", "L.object.348-369"
+        "L.object.341", "L.object.349-369"
       ],
       "owner": "mk-authority",
       "branch": "feature/mk-authority",

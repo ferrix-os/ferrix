@@ -4168,19 +4168,52 @@ package FerrixObjectRequirements {
         requirement <'L.object.342'> aCopyRefusedForMemorySaysSo : ItemLowLevel {
             attribute :>> statement = "A copy into a program's memory whose page could not be faulted in for want of a
                 frame shall answer NoMemory, and one to an address its space never mapped shall answer Fault.";
-            attribute :>> criterion = "user::edge_check's copy case: every variant of SpaceError and of VmoError, each named
-                with no wildcard in the mapping, answers NoMemory for want of a frame and Fault otherwise, and a copy to an address never mapped reads Fault; object::quota_check's memory
+            attribute :>> criterion = "user::edge_check's copy case: every variant of SpaceError and of VmoError answers as
+                the check's copy_answer, which names each with no wildcard, says: NoMemory for want of a frame and Fault
+                otherwise; and a copy to an address never mapped reads Fault; object::quota_check's memory
                 case: a copy as a task of a job at its memory limit, into the first page refused, reads NoMemory.";
             attribute :>> parent = "H.QUOTA.2";
             attribute :>> unit = "syscall::uaccess::UserError::from";
+        }
+        requirement <'L.object.343'> linuxdsPromiseIsTakenWhenTheRootIsBack : ItemLowLevel {
+            attribute :>> statement = "linuxd's arena shall be sized from a promise taken after the initramfs is given
+                back, as large as the reservation's admission allows then.";
+            attribute :>> criterion = "mm::seal_check::check_linuxd_promise on every checked retyped boot: the initramfs
+                was not held at the promise, the admission refuses the promise 256 frames more (the check's resolution: frames
+                another processor gives back between the promise and the check can widen what it admits by less than that,
+                so it judges "not less"), and the arena is seven eighths of the entry;
+                its control, the promise taken again above the initramfs's return, FIRED.";
+            attribute :>> parent = "H.MEM.32";
+            attribute :>> unit = ("linuxd_start::size_the_arena", "linuxd_start::region_for");
+            attribute :>> scope = "kernel_memory=retyped";
+        }
         requirement <'L.object.344'> theDriversRunInTheirSlice : ItemLowLevel {
             attribute :>> statement = "devmgr shall be started in drivers.slice, the one job a boot makes of that name,
                 on the kernel's path and on a user kernel's.";
             attribute :>> criterion = "syscall::rehome_check::check_one_slice, asked by devmgr_job on every checked boot
                 that starts devmgr: the job is drivers.slice; its control, the kept slice not answered, FIRED on a user
-                kernel on x86_64 KVM and AArch64 TCG (n27b-s-ctl-x86, n27b-s-ctl-a64).";
+                kernel on x86_64 KVM and AArch64 TCG (n27b-s2-ctl-x86, n27b-s2-ctl-a64).";
             attribute :>> parent = "H.OBJ.22";
             attribute :>> unit = ("discovery::devmgr::drivers_job", "discovery::devmgr::devmgr_job");
+        }
+        requirement <'L.object.345'> aMachineTooSmallIsRefusedByName : ItemLowLevel {
+            attribute :>> statement = "A machine whose linuxd arena would not hold linuxd's root and its programs shall be
+                refused before linuxd runs, with FX-0955 and a line that says the machine is too small for
+                kernel_memory=retyped.";
+            attribute :>> criterion = "mm::seal_check::check_arena_refusal: an arena one frame under what the root and
+                programs need is refused and one of exactly that is not; and a machine one step under the stated minimum reads
+                the line and ends with FX-0955, on x86_64 and AArch64 (docs/microkernel/K16.md §4.1).";
+            attribute :>> parent = "H.MEM.32";
+            attribute :>> unit = "mm::seal::arena_refused";
+            attribute :>> scope = "kernel_memory=retyped";
+        }
+        requirement <'L.object.348'> theDriversHoldOnePromise : ItemLowLevel {
+            attribute :>> statement = "Under kernel_memory=retyped the drivers shall hold one promise, their slice's.";
+            attribute :>> criterion = "syscall::rehome_check::check_one_promise, asked by devmgr_job on every checked
+                retyped boot: drivers_job made one promise; its control, a second promise made, FIRED.";
+            attribute :>> parent = "H.MEM.32";
+            attribute :>> unit = "discovery::devmgr::drivers_job";
+            attribute :>> scope = "kernel_memory=retyped";
         }
         requirement <'L.object.346'> aFurtherPartitionHoldsItsRow : ItemLowLevel {
             attribute :>> statement = "A further Linux partition shall be started in a job and a region of its own with the

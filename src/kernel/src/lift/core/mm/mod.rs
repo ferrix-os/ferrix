@@ -91,7 +91,8 @@ pub enum Retired {
 }
 /// Frames a program's page does not get: the heap is on the same pool, and a
 /// section the load entered on `reserve` allocates without being able to refuse.
-const KEPT_FROM_PROGRAMS: u64 = 16 << 20 >> 12;
+/// One constant with the kernel's sizing of the arena.
+const KEPT_FROM_PROGRAMS: u64 = ferrix_native_abi::lift::ARENA_KEPT_FRAMES;
 
 /// The shim's section guard.
 #[derive(Debug)]

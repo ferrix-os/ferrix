@@ -7,6 +7,13 @@
 # its vulnerability-analysis entry exists (the customer's rule of 2026-10-02,
 # binding max alone); then it becomes `on` as a dated change to this file.
 # restricted_fastpath is `off` until K1's review decides it.
+#
+# kernel_memory=retyped needs a machine of at least 640 MiB on x86_64 and on AArch64 under this
+# profile's values (fs=server), and 480 MiB (x86_64) or 464 MiB (AArch64) without fs=server: the
+# smallest QEMU machine on which linuxd's arena clears the line the kernel computes at boot from the
+# root it is given, for this image, at the hash and rows docs/microkernel/K16.md §4.1 names. A smaller
+# machine is refused by name before linuxd runs (FX-0955, "the machine is too small for
+# kernel_memory=retyped"). Not a board figure: the target's is M7's (ledger 7017 R.5, 10379, 10468).
 
 profile = "max"
 # No claim until M7, which writes `level = "sc4"` and takes `target_level` out, and rule 3
