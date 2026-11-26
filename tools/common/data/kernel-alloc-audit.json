@@ -271,6 +271,11 @@
       "what": "the creator's; delivery allocates nothing",
       "sites": 4
     },
+    "platform/google/gs201/watchdog.rs": {
+      "bucket": "boot",
+      "what": "R.4's read (ledger 7017, 10421 I1): init's one site, vmap::map_device of each watchdog's window, reached by name only from power::init -> arch::init_watchdogs -> watchdog::init, at bring-up before devices are enumerated and long before linuxd_start's seal, and at that same place on any board whose tree matches a gs201 compatible (on QEMU virt none does, so nothing is mapped); start's task, spawned from kmain before first_processes and so before the seal, runs after it but only feeds and resets by MMIO (feed, reset_now), allocating nothing",
+      "sites": 1
+    },
     "sched/mod.rs": {
       "bucket": "job",
       "what": "a task and its stack: the job's; new_idle_task, adopt_boot_task boot; reap_* free; cpu_times the caller's",

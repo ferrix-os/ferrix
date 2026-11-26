@@ -44,8 +44,21 @@ NOT_BUILT = re.compile(
     r"|console/screen\.rs|panic/screen\.rs|discovery/powerctl|discovery/firmware\.rs"
     r"|arch/x86_64/powerctl)"
 )
-# Read for no claim yet (A.1): aarch64 before K16's second landing, armv7a with a row.
-UNREAD = ("arch/armv7a/", "platform/")
+# The board glue's parts: compiled into every kernel with board_glue=on, so rustc
+# reads them and `--built` cannot hold them out, but named by no code of this shape,
+# so no symbol of theirs is in the image: check-kernel-shape.py's LEFT_CRATES, by nm,
+# in the same row (R.4, ledger 7017, 10421 I2). Not read here, as not linked.
+NOT_LINKED = re.compile(r"^(platform/st/|platform/google/gs201/usb\.rs)")
+# Each NOT_LINKED part, a file of it, and its crate in check-kernel-shape.py's LEFT_CRATES.
+NOT_LINKED_CRATES = {
+    "platform/st/stm32mp1.rs": "ferrix_kernel_board_stm32mp1",
+    "platform/google/gs201/usb.rs": "ferrix_kernel_board_gs201_usb",
+}
+# Read for no claim yet (A.1): armv7a with a row. platform/ was read for R.4
+# (ledger 10421): what it builds is in the audit, the board glue in NOT_LINKED,
+# and a new file there is unread until the audit names it.
+UNREAD = ("arch/armv7a/",)
+
 
 
 def fallible_gate():
@@ -101,11 +114,30 @@ def self_test(gate) -> int:
         failed.append("a moved count")
     if not problems({"a.rs": 1}, {"a.rs": {"bucket": "made up", "sites": 1}}):
         failed.append("a bad bucket")
+    # R.4 (ledger 10421 I3): a new file under platform/ is unread until the audit
+    # names it, so it fails rather than passing as unread.
+    if "platform/google/new.rs".startswith(UNREAD) or not problems({"platform/google/new.rs": 1}, {}):
+        failed.append("a new platform/ file")
+    # V2 (ledger 10522): every NOT_LINKED path is a part whose crate check-kernel-shape.py
+    # holds out of the image by nm (LEFT_CRATES), so the two lists cannot part.
+    shape = importlib.util.spec_from_file_location(
+        "shape", os.path.join(os.path.dirname(os.path.abspath(__file__)), "check-kernel-shape.py")
+    )
+    held = importlib.util.module_from_spec(shape)
+    shape.loader.exec_module(held)
+    for path, crate in NOT_LINKED_CRATES.items():
+        if not NOT_LINKED.match(path) or crate not in held.LEFT_CRATES:
+            failed.append(f"{path}: NOT_LINKED with no crate in LEFT_CRATES")
+    if not NOT_LINKED_CRATES:
+        failed.append("NOT_LINKED names no part")
+    # I2: the board glue is not linked, so not read; nothing else under platform/ is.
+    if not NOT_LINKED.match("platform/st/stm32mp1.rs") or NOT_LINKED.match("platform/google/gs201/watchdog.rs"):
+        failed.append("the board glue's class")
     for what in failed:
         print(f"check-kernel-alloc-audit: self-test: {what} did not fire")
     if failed:
         return 1
-    print("check-kernel-alloc-audit: self-test: 6 planted differences FIRED")
+    print("check-kernel-alloc-audit: self-test: 8 planted differences FIRED")
     return 0
 
 
@@ -127,7 +159,7 @@ def scan(root: str, gate) -> tuple[dict, list[str]]:
                 # matched on that; it is reported by its repo path (S2).
                 module = os.path.relpath(full, base).replace(os.sep, "/")
                 rel = module if source == SOURCE else f"{source}/{module}"
-                if is_check(rel) or NOT_BUILT.match(module):
+                if is_check(rel) or NOT_BUILT.match(module) or NOT_LINKED.match(module):
                     continue
                 with open(full, encoding="utf-8", errors="replace") as handle:
                     count = sites_in(handle.read(), gate)
