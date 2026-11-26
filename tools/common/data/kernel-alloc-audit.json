@@ -334,7 +334,7 @@
     "user/address_wait.rs": {
       "bucket": "job",
       "what": "the waiter's job; the shared table grows and shrinks under heap and is one static bucket of FIXED_WAITERS in ring 0 under retyped (K16.9)",
-      "sites": 18
+      "sites": 17
     },
     "user/cache.rs": {
       "bucket": "job",
