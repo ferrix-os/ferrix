@@ -114,21 +114,61 @@ fn test_kernel_shape(args: &Args) -> Result<()> {
             "tools/common/check/check-kernel-alloc-audit.py",
             &["--built", directory.as_str()],
         )?;
-        // Z3 and 6093 (9)(d): what K1's fast path promises of normal mode's code.
-        if arch == paths::Arch::X86_64 {
-            let linuxd = native::LINUXD;
-            let path = cargo::build_native(
+        let budget = std::env::var(BUDGET_SET).is_ok();
+        // linuxd: for the fast path's promise on x86-64, and for the values' symbols on both.
+        let linuxd = if arch == paths::Arch::X86_64 || !budget {
+            let program = native::LINUXD;
+            match cargo::build_native(
                 arch,
                 args.release,
-                linuxd.package,
-                linuxd.binary,
+                program.package,
+                program.binary,
                 &paths::target_dir(),
-            )?;
-            let path = path.display().to_string();
+            ) {
+                Ok(path) => Some(path.display().to_string()),
+                // ARMv7-A is in no claim of personality=user (ledger 7016 B.1): where linuxd
+                // does not build there, its symbols are skipped by name, never passed silently
+                // (ledger 10144 X3).
+                Err(error) if arch == paths::Arch::Armv7a => {
+                    println!(
+                        "  {arch}: check-value-symbols: linuxd NOT READ, it does not build here: {error}"
+                    );
+                    None
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            None
+        };
+        // Z3 and 6093 (9)(d): what K1's fast path promises of normal mode's code.
+        if arch == paths::Arch::X86_64
+            && let Some(path) = &linuxd
+        {
             python_with(
                 "tools/common/check/check-linuxd-binary.py",
                 &[path.as_str()],
             )?;
+        }
+        // Ledger 7016 B.2: each value's own code in under it and out under another, by nm. Not
+        // in the ring-0 budget's builds, which judge sizes, so that its row's time is unmoved.
+        if !budget {
+            let words = crate::flags::this_run()?.cfg_words();
+            let kernel = kernel.elf.display().to_string();
+            let mut arguments = vec![
+                "--arch",
+                arch.name(),
+                "--words",
+                words.as_str(),
+                "--kernel",
+                kernel.as_str(),
+            ];
+            if let Some(path) = &linuxd {
+                arguments.extend(["--linuxd", path.as_str()]);
+            }
+            if args.release {
+                arguments.push("--release");
+            }
+            python_with("tools/common/check/check-value-symbols.py", &arguments)?;
         }
         if let Ok(set) = std::env::var(BUDGET_SET) {
             if !args.release {
