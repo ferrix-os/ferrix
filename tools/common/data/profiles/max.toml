@@ -14,6 +14,8 @@
 # root it is given, for this image, at the hash and rows docs/microkernel/K16.md §4.1 names. A smaller
 # machine is refused by name before linuxd runs (FX-0955, "the machine is too small for
 # kernel_memory=retyped"). Not a board figure: the target's is M7's (ledger 7017 R.5, 10379, 10468).
+# These were found on debug images. A release image is refused by name at 640 MiB under fs=server
+# (tag n27c-k9-s2-rel-dev, develop 2d96e34fe); its minimum is not yet found (ledger 10735 M2, M3).
 
 profile = "max"
 # No claim until M7, which writes `level = "sc4"` and takes `target_level` out, and rule 3
