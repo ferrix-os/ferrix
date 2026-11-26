@@ -31,7 +31,7 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | `max` | `fault_ahead=off` | `yes`, x86-64 and AArch64 | | Flipped (ledger 10144 X7), rows ad hoc, below. B.6's off half as amended by 10144 X7, which withdraws "the walk's control silent": `test-threads --smp 2` and `test-container` PASSED under `off` on x86-64 KVM and AArch64 TCG; nm by the gate: `fault_around`, `write_ahead` out of `linuxd` in the development and release builds on both, in under `on`, the plant (build.rs giving linuxd `on`) FIRED on both. The walk control was dead under `on` as well, `on`'s, F-122, closed since |
 | `fast` | `schedule=edf` | `yes`, x86-64 and AArch64 | | Flipped at 9ebe69358: `test-flags` both, AArch64's `test-shell`, `test-threads --smp 2` PASSED; `test-kernel-symbols` re-read (`mkf3b-sym-*-present`). The fast path's decline on a channel: case 197, `restricted-check`, with its control. nm: `ferrix_sched_edf` in under `edf`, out under `fair`. `G.1`'s generic set over all three tiers with `windows` |
 | `max` | `schedule=windows` | `adhoc` | both, not yet (ledger 10101, 10241, 10800, 10823): under a host CPU burst the held processor's timer interrupt arrives late and the class decides right at every pick, so a partition's task executes in another partition's window for as long as the interrupt is late, which QEMU TCG cannot bound (K9 §4, BACKLOG 671). The order is now judged from the class's own picks in every boot and time only in a boot that measured itself clean (K9 §4; a KVM boot that did not is no passed row); `built` carries no timing claim, and the time bound is an M7 objective owed before M5's flip (BACKLOG 678). The check landed on its review (ledger 10878); at the flip the row is run again on the flip's own hash under 10241 T8's rule (5 of 5 on AArch64 TCG `--smp 2`, at least 3 clean in both boots, plus 3 burst boots) on a quiet host (10878 J6); x86-64 under 10241 T9 and 10823 D4, its own data-only commit, which gives `max` nothing | K9 §4, ledger 7460, 7540, 7549, 7562, 7732, 10087, 10101: `ferrix-sched-windows`, the kernel's default frame sealed before any first process (by order, WZ.12), `windows_check` with each id its failure line; the code is in, dark, `--set schedule=windows` ad hoc. Owed for `built`: the order cases judged from the class's own picks on AArch64 with a control that fires on a broken rotation, then the row 5 of 5 on the landing hash (10101 B4); S.6's list per architecture (10087 A1). The idle-at-end start delay is unjudged under every hypervisor, a halted vCPU's wake being the host's latency (BACKLOG 678, M5's flip, 10087 A8). WZ.6's check-only waits are done (ledger 10222): each check's `yield_now` is answered in K9 §4.1, a spin-wait on another task gives way, `check-yield-sites.py` holds the list. Owed beside it (10361 D3): `.text` and count A of a `--personality user --set schedule=windows` release kernel on both architectures beside the same without windows. `max` claims AArch64 alone |
-| `max` | `kernel_memory=retyped` | `adhoc` | K16.5, K16.7, K16.9, F.8 (R.1, R.3); R.4's `platform/` read before AArch64 joins `built_on` | R.2 closed by cause (ledger 10111, 10191); R.5's sizing landed (ledger 10391): the promise after the initramfs's return, one drivers' promise, a machine too small refused by name. **Every retyped row names its machine:** `--memory 640` under `max`'s values (`fs=server`) on x86-64 and AArch64, the default 512 MiB being under that minimum; 480 MiB (x86-64) and 464 MiB (AArch64) without `fs=server` (K16.md §4.1). These are debug images' minimums: a release image is refused by name at 640 MiB under `fs=server` (`n27c-k9-s2-rel-dev`), its minimum not yet found (ledger 10735 M2, M3). Rows of this sizing on both architectures, x86-64 KVM and AArch64 TCG, ad hoc, not `max`. F-128 closed by fix (a): a promise the kernel made is not changed through a call (L.object.350, K16.md §4.2; ledger 10673, 10688, 10787). F.8's report landed (L.object.349's first part: the frames outside every promise counted at the seal, ledger 10892); its two other parts, the kernel's share bounded and a job's share held by its quota, are the hard check's. Next: K16.9's tables and F.8's count (agent B), K16.5's static check and R.4 (agent E), R.3 |
+| `max` | `kernel_memory=retyped` | `adhoc` | owed for `built` on AArch64 (10916): F.8's report (R4), F-130's fix (R3), R5's release boot and the sweep on the flip's hash; K16.5 done (7d834793a), R.4's `platform/` read done (86ce126f4); K16.9, F.8's bound, part B and R.3 moved to before M5's flip by the customer (ledger 10927) | R.2 closed by cause (ledger 10111, 10191); R.5's sizing landed (ledger 10391): the promise after the initramfs's return, one drivers' promise, a machine too small refused by name. **Every retyped row names its machine:** `--memory 640` under `max`'s values (`fs=server`) on x86-64 and AArch64, the default 512 MiB being under that minimum; 480 MiB (x86-64) and 464 MiB (AArch64) without `fs=server` (K16.md §4.1). These are debug images' minimums: a release image is refused by name at 640 MiB under `fs=server` (`n27c-k9-s2-rel-dev`), its minimum not yet found (ledger 10735 M2, M3). Rows of this sizing on both architectures, x86-64 KVM and AArch64 TCG, ad hoc, not `max`. F-128 closed by fix (a): a promise the kernel made is not changed through a call (L.object.350, K16.md §4.2; ledger 10673, 10688, 10787). F.8's report landed (L.object.349's first part: the frames outside every promise counted at the seal, ledger 10892); its two other parts, the kernel's share bounded and a job's share held by its quota, are the hard check's. Moved to before M5's flip by the customer, 2026-11-26 (ledger 10927; *Moved to before M5's flip* below): so "sealed heap, promises and their refusals are real; the kernel's own tables and the frames outside every promise can still grow after the seal, bounded by the pool and the machine, not by a figure decided at boot; a promise is a floor, not a cap; a restart that does not fit is refused piecemeal, not by name" (ledger 10916). Release boots at 768 MiB; its minimum not found (10916 R5) |
 
 ## What refuses them after every value is `built`
 
@@ -56,8 +56,17 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | BACKLOG 423 | netd's network row, N.7 | netd entering a profile, M5's flip |
 | BACKLOG 426 | `Load(Copy(Fault))` under retyped: traced, the arena's sizing, which stays open (ledger 10111) | `built` of `retyped` (R.2 by cause; the sizing R.5) |
 | BACKLOG 428 | a real device's write outside its domain, SH.2 | M5's flip |
-| BACKLOG 429, 436 | K16.5, K16.9, F.8 | `built` of `retyped` (R.1); K16.2 to M7 (R.4) |
-| BACKLOG 436 | K16.7 | the refusal by name for `built`, the rest to M7 (R.3) |
+| BACKLOG 429, 436 | K16.5 | `built` of `retyped` (R.1): done (7d834793a, `check-fatal-alloc`); K16.2 to M7 (R.4) |
+| BACKLOG 436 | K16.7 | the rest to M7 (R.3); its refusal by name, below |
+| BACKLOG 552 | K16.9's fixed tables from `max_processes` (10548) | M5's flip: moved from `built` of `retyped` by the customer, 2026-11-26 (ledger 10927) |
+| BACKLOG 553 | F.8's hard bound, FX-0982, with the cap on overdraw (10701 R2); F.8's report half stays `built`'s (10916 R4) | M5's flip: moved by the customer, 2026-11-26 (ledger 10927) |
+| BACKLOG 554 | part B's three driver-table capacities (10655) | M5's flip: moved by the customer, 2026-11-26 (ledger 10927) |
+| BACKLOG 555 | R.3: a restart that does not fit refused by name (K16.7) | M5's flip: moved by the customer, 2026-11-26 (ledger 10927) |
+| BACKLOG 557 | `schedule=windows`: WT.6's eight boots at load 50 and above | M5's flip: moved by the consultant (ledger 10916) |
+| BACKLOG 558 | the release minimums under `retyped` (10735 M3); R5's one release boot in its place | M5's flip: moved by the consultant (ledger 10916) |
+| BACKLOG 559 | item 3: `max`'s stop on an uncovered processor, in code (10848; text aa6bb4a6e) | M5's flip: moved by the consultant (ledger 10916), the rows on `neoverse-n1` |
+| BACKLOG 560 | item 4: a row's boot options against its profile, by a checker (LV.5, 10522 (C)) | M5's flip: moved by the consultant (ledger 10916), the hand table below in its place |
+| BACKLOG 561 | `test-init` on a command line `max` permits (10963 S6) | M5's flip |
 | BACKLOG 551 | R3 charging, `TRANSFER`, rows with no check, §7's rows | M5's flip |
 | BACKLOG 569 | `fault_ahead`'s A7 controls | `built` of `on` (B.6): done 2026-11-26, on develop on both architectures (ledger 10259, `n27c-fa-*`) |
 | BACKLOG 577 | the window's W2-W8 | M5's flip |
@@ -67,11 +76,62 @@ Its loader starts only a verifying slot, so each image built for it signs one le
 | BACKLOG 679 | `schedule=windows`: a partition-0 worker's wait on a sleep lock held across a window's end, bound owed (ledger 10087 A5, W.3) | M7 |
 | BUILD-FLAGS 557 | `linux_abi=off` in a profile | no profile carries it |
 | MICROKERNEL 379 | coverage and rows at the flip | M5's flip |
-| K16 9, 11, 17, 56 | as BACKLOG 426, 429, 436 | `built` of `retyped` |
+| K16 9, 11, 17, 56 | as BACKLOG 426, 429, 436, 552-555 | `built` of `retyped` for what stays (10916 R4: F.8's report); M5's flip for what moved (ledger 10927) |
 | M5-LIFT 466, 498, 563 | flip preconditions, test-powerfail, the window | M5's flip |
 | M6 75 | a user kernel's coverage | M7 |
 
 M5's flip and M7 keep all of theirs: nothing here is dropped by being moved off `built`.
+
+## Moved to before M5's flip (the customer, 2026-11-26, ledger 10927; ruling 10916)
+
+The customer, in person, on ledger 10916's packet: "Move them" (ledger 10927). What moved from "owed for `built` of
+`kernel_memory=retyped`" (7017 R.1, R.3) to "owed before M5's flip", each a BACKLOG row:
+
+* K16.9's fixed kernel tables, sized from the description's `max_processes` (ledger 10548): BACKLOG 552.
+* F.8's hard bound on the frames outside every promise (FX-0982), with the cap on a job overdrawing its promise
+  (10701 R2): BACKLOG 553. F.8's report half, the exact count at the seal, stays a condition (10916 R4).
+* Part B's three driver-table capacities (ledger 10655): BACKLOG 554.
+* R.3's refusal by name of a restart that does not fit (K16.7), advisory without R2's cap: BACKLOG 555.
+
+So, under `kernel_memory=retyped`, in the consultant's words (10916): "sealed heap, promises and their refusals are
+real; the kernel's own tables and the frames outside every promise can still grow after the seal, bounded by the pool
+and the machine, not by a figure decided at boot; a promise is a floor, not a cap; a restart that does not fit is
+refused piecemeal, not by name". Every refusal on those paths answers (F-125, F-128, F-129, F-130) instead of hanging
+or failing open; F-130's fix is the condition the consultant named for signing the move (10916 R3).
+
+Moved by the consultant's own ruling (10916), none a condition of `built` in this file's words:
+
+* `schedule=windows`: WT.6's eight boots at load 50 and above (BACKLOG 557). T8's three burst boots and T7's burst
+  control carry the decisions the check judges; time is not `built`'s.
+* The release minimums under `retyped` (10735 M3; BACKLOG 558). In their place R5: one release boot of `max`'s image on
+  AArch64 in the sweep. Release boots at 768 MiB; its minimum not found.
+* Item 3: `max`'s stop on a processor its exit barrier does not cover, in code (10848; the text aa6bb4a6e, AoU-49;
+  BACKLOG 559). Every `max` row boots QEMU's `neoverse-n1` and its `qemu:` line reads "cpu neoverse-n1 (profile max)".
+* Item 4: a row's boot options judged against its profile's permitted set by a checker (BACKLOG 560). In its place
+  the hand table below (10522 (C)).
+
+## `max`'s sweep rows' boot options against its permitted set (by hand, ledger 10916, 10522 (C))
+
+`max.toml`'s `[boot_options]` permits `ferrix.checks=run`, `ferrix.root=*`, `ferrix.init=*`, `ferrix.onexit=*`,
+`ferrix.panic=halt`, `ferrix.vtd=on`, `ferrix.amdvi=on`, `console=*`. Each row's image command line
+(`FERRIX/CMDLINE.TXT`, which the loader hands the kernel) as the kernel prints it, `cmdline <words> (from
+/FERRIX/CMDLINE.TXT)`, in the row's log on the flip's hash; a boot with no such line was given none. Read by hand:
+item 4's checker is what would read it.
+
+| Row | Its image's command line | Against `max`'s set | What the row then does not show |
+|---|---|---|---|
+| `test-flags`, and R5's release boot | none (`build_image` → `arch_cmdline`: no `--reset`, `--init-path`, `--kernel-option` given; AArch64 without `FERRIX_ARM_MACHINE`) | inside | |
+| `test-linuxd` | none (`main.rs` `test_linuxd`) | inside | |
+| `test-shell` | first boot none; second boot `ferrix.init=/etc/shell-test` | inside | |
+| `test-threads --smp 2`: T8's five, its three burst boots, x86-64 KVM's ad hoc row | none (`threads.rs`) | inside | |
+| `test-init` | `ferrix.init=/sbin/init ferrix.devmgr=init` (`init.rs` `command_line`) | `ferrix.init`: inside. **`ferrix.devmgr=init`: outside** (the registry's `values = ["kernel", "init"]`, `until = "M5"`; `max` permits neither) | devmgr started by pid 1, not by the kernel as a `max` image's own boot starts it; init's images skip the kernel's disk checks for it (`init.rs`). A row of `max`'s build values, not of a `max` image's own boot (ledger 10963 S6); `test-shell` on `max`'s own line shows devmgr started by the kernel ("devmgr   started: its channels go to linuxd", no `ferrix.devmgr`). A `test-init` on a line `max` permits is owed before M5's flip (BACKLOG 561) |
+| `test-btrfsd-restart --init busybox` | none (`kernel_shape.rs`: busybox is the kernel's init, no `ferrix.init`) | inside | |
+| `test-partitions --init busybox` | none (`kernel_shape.rs`); a further partition's `ferrix.partition=1` is the kernel's line to that partition's linuxd, no boot option | inside | |
+| `test-container` | none (`sem.rs` `boot`) | inside | |
+| 10958 B4's scrub control (`n27f-*-u4-a64`) | none (a `test-flags` boot) | inside | |
+| `check`, `test-kernel-shape`, `check-stack-depth`, `check-fatal-alloc`, `test-ring0-budget`, B.7's controls | no boot | | |
+
+A row added to the sweep enters this table first; one outside the set is named with what it does not show.
 
 ## K14 at no memory (ledger 7166 F.3)
 
