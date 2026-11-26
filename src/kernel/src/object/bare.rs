@@ -156,6 +156,11 @@ impl Bare {
         job: Arc<Job>,
         region: Option<Arc<Region>>,
     ) -> Result<Arc<Bare>, AllocError> {
+        // Ring 0's table is fixed under `retyped` (K16.9): a process with no number would escape
+        // its limit, so none is made; the caller answers its refusal (`EAGAIN`, `NO_MEMORY`).
+        #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+        let pid = process::allocate().ok_or(AllocError)?;
+        #[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
         let pid = process::allocate().unwrap_or(0);
         let core = Process::new(space, pid, job)?;
         let core = match region {
