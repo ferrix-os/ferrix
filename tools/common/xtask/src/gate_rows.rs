@@ -136,6 +136,10 @@ const DRIVER_MODEL: &[&str] = &[
     "tools/common/xtask/src/driver_model.rs",
 ];
 
+/// K16.5's static check, its own row (ledger 10834 L6): every landing that touches the
+/// kernel, the tool or its EXEMPT runs it.
+const TEST_FATAL_ALLOC: &str = "check-fatal-alloc --personality user --set kernel_memory=retyped";
+
 /// What asks for [`TEST_GPU_RESTART`]: the Intel driver, its fake and its
 /// library, devmgr, which starts it again, the chardev core its clients
 /// reach it through, and the gate's own program and judge.
@@ -170,6 +174,9 @@ const IMAGE_ROW: &[&str] = &[
     "test-boot --arch armv7a",
     "test-boot --arch armv7a --smp 2",
     "test-ring0-budget",
+    // K16.5: no FATAL-ALLOC site reached after the seal, from the retyped images (ledger
+    // 10834 L6); every landing in the image row touches the kernel, the tool or xtask.
+    TEST_FATAL_ALLOC,
 ];
 
 /// The core quarantine row (`docs/CORE-QUARANTINE.md` §7, ledger 4932):
@@ -1216,6 +1223,23 @@ mod tests {
         }
         let rows = rows_of(&["src/user/system/native/memscrub/src/main.rs"]);
         assert!(!rows.commands.iter().any(|c| c == TEST_MEMKEEP[0]));
+    }
+
+    #[test]
+    fn the_kernel_and_the_tool_add_check_fatal_alloc() {
+        for path in [
+            "src/kernel/src/object/job.rs",
+            "tools/common/check/check-fatal-alloc-boot.py",
+            "tools/common/xtask/src/fatal_alloc.rs",
+        ] {
+            let rows = rows_of(&[path]);
+            assert!(
+                rows.commands.iter().any(|c| c == TEST_FATAL_ALLOC),
+                "{path}"
+            );
+        }
+        let rows = rows_of(&["docs/BACKLOG.md"]);
+        assert!(!rows.commands.iter().any(|c| c == TEST_FATAL_ALLOC));
     }
 
     #[test]

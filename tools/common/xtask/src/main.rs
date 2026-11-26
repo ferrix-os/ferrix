@@ -131,6 +131,7 @@ mod edid;
 mod eventlog;
 mod everything;
 mod fat;
+mod fatal_alloc;
 mod ferrousli;
 mod first_processes;
 mod flags;
@@ -613,6 +614,7 @@ const TASKS: &[&[Task]] = &[
     lode_remote::TASKS,
     first_processes::TASKS,
     kernel_shape::TASKS,
+    fatal_alloc::TASKS,
     kernel_shape::FIRST_TASKS,
     machine_check::TASKS,
     mce_cmci::TASKS,
