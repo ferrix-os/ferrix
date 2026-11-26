@@ -262,6 +262,7 @@ fn run() -> Result<Report, &'static str> {
         .map_err(|_| "no room for the check's job")?;
     let job = side.handle(nr::JOB_CREATE, &[reg(root_handle), 0], "job_create failed")?;
     refusals(&side, job)?;
+    a_region_process_past_its_jobs_task_limit(&side, root_handle)?;
     let region = side.handle(
         nr::REGION_CREATE,
         &[reg(job), OUT_AT],
@@ -357,6 +358,48 @@ fn run() -> Result<Report, &'static str> {
 
 /// A thread's window went with it, and its frames and charge with that (ledger 6787 W11): back
 /// to the count before it was made, once its handle is gone.
+/// F-130's G1 (ledger 10775): a region's processes in a job limited to `LIMIT` tasks, made
+/// through `process_create_shared` until one is refused or one past the limit is made; what
+/// it answered is said. Not yet a requirement's case: it judges nothing.
+fn a_region_process_past_its_jobs_task_limit(
+    side: &Side,
+    root: Handle,
+) -> Result<(), &'static str> {
+    const LIMIT: u64 = 2;
+    let job = side.handle(nr::JOB_CREATE, &[reg(root), 0], "job_create failed")?;
+    side.put(STATUS_AT, &LIMIT.to_ne_bytes())?;
+    side.call(
+        nr::JOB_SET_LIMIT,
+        &[reg(job), ferrix_native_abi::types::JOB_TASKS, STATUS_AT],
+    )
+    .map_err(|_| "job_set_limit on the tasks failed")?;
+    let region = side.handle(
+        nr::REGION_CREATE,
+        &[reg(job), OUT_AT],
+        "region_create failed",
+    )?;
+    side.put(NAME_AT, b"f130-g1")?;
+    let mut made = 0_u64;
+    let mut answer = None;
+    while made <= LIMIT {
+        match side.call(
+            nr::PROCESS_CREATE_SHARED,
+            &[reg(region), reg(job), 0, NAME_AT, 7, OUT_AT],
+        ) {
+            Ok(_) => made += 1,
+            Err(errno) => {
+                answer = Some(errno);
+                break;
+            }
+        }
+    }
+    crate::console::println!(
+        "  regions  F-130 G1: a job limited to {LIMIT} tasks, {made} processes made by \
+         process_create_shared, the last answered {answer:?} (None: made)"
+    );
+    Ok(())
+}
+
 fn window_went(before: u64) -> bool {
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
     while crate::arch::windows_live() != before {
