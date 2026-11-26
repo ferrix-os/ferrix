@@ -31,7 +31,10 @@ What it checks
     `item` ring or on its infrastructure allow-list, for
     x86_64-unknown-none, aarch64-unknown-none-softfloat and
     armv7a-none-eabi, in the reference configuration (no Cargo features,
-    `--mitigations on`), in a target directory of its own.
+    `--mitigations on`), in a target directory of its own. A profile
+    carrying a value whose code refuses itself on a target by
+    `compile_error!` (`NO_CODE_ON`: `schedule=windows` on ARMv7-A, so
+    `max`) skips that target, says so, and fails if the refusal is gone.
   * **Nightly features.** The step clears `RUSTC_BOOTSTRAP`, so a
     `#![feature]` is the stable compiler's error E0554; and before any
     compiling it lists every `#![feature]` attribute and every
@@ -65,6 +68,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -87,6 +91,46 @@ KERNEL_TARGETS = (
     "aarch64-unknown-none-softfloat",
     "armv7a-none-eabi",
 )
+# A value whose code refuses itself on a target by `compile_error!`, so a
+# profile carrying it is type-checked on the other targets alone: the key,
+# the target, and the file whose refusal must still say so (the exclusion
+# goes when the refusal does). `schedule=windows` has no ARMv7-A code (K9
+# section 4, ledger 7549 WY.13): `max` is checked on x86-64 and AArch64.
+# The refusal is its `cfg` line and the `compile_error!` line under it,
+# matched together (a refusal moved under another `cfg` ends the excuse);
+# the architecture must lie outside the value's `built_on` in
+# build-flags.toml; and xtask's check.rs carries the same entry for its
+# kernel lint (ledger 10948 N1, N2).
+NO_CODE_ON = (
+    ("schedule", "windows", "armv7a", "armv7a-none-eabi", "src/kernel/src/arch/armv7a/mod.rs",
+     '#[cfg(ferrix_schedule = "windows")]\n'
+     'compile_error!("schedule=windows is not built for ARMv7-A'),
+)
+FLAG_FILE = "tools/common/data/build-flags.toml"
+XTASK_CHECK = "tools/common/xtask/src/check.rs"
+XTASK_ARCH = {"x86_64": "X86_64", "aarch64": "AArch64", "armv7a": "Armv7a"}
+
+
+def no_code_problems(flags_text: str, xtask_text: str, tree) -> list[str]:
+    """What breaks `NO_CODE_ON`'s excuses: each entry's refusal gone from
+    `tree(path)`, its architecture in the value's `built_on`, or xtask's
+    entry missing. Empty when every excuse holds."""
+    declared = tomllib.loads(flags_text)["flags"]
+    problems = []
+    for flag, value, arch, target, source, refusal in NO_CODE_ON:
+        if refusal not in tree(source):
+            problems.append(f"{flag}={value} is excused on {target} for a refusal {source} "
+                            f"no longer holds (its cfg line and compile_error! together)")
+        built_on = declared.get(flag, {}).get("values", {}).get(value, {}).get("built_on")
+        # An absent built_on names no architecture here: such a value is in no
+        # profile that builds, so the excuse is inert until it is given one.
+        if built_on is not None and arch in built_on:
+            problems.append(f"{flag}={value} is excused on {target}, an architecture its built_on "
+                            f"in {FLAG_FILE} names ({built_on})")
+        rust = f'("{flag}", "{value}", Arch::{XTASK_ARCH[arch]})'
+        if rust not in xtask_text:
+            problems.append(f"{XTASK_CHECK}'s NO_CODE_ON lacks {rust}: the kernel lint would differ")
+    return problems
 # The flags a kernel manifest keys a dependency table on: xtask's cargo.rs
 # MANIFEST_FLAGS and build.rs's list, by name (check-build-flags.py holds the
 # three equal).
@@ -228,7 +272,21 @@ def main() -> int:
     say(f"Rust {RUST}, the upstream release Ferrocene {FERROCENE_RELEASE} is built from "
         f"(not Ferrocene's qualified binary, which needs the customer's subscription)")
     say("packages: " + ", ".join(name for name, _ in chosen))
-    say("targets: " + ", ".join(KERNEL_TARGETS))
+    chosen_flags = dict(word.split("=", 1) for word in os.environ.get("FERRIX_BUILD_FLAGS", "").split())
+    targets = list(KERNEL_TARGETS)
+    problems = no_code_problems((ROOT / FLAG_FILE).read_text(encoding="utf-8"),
+                                (ROOT / XTASK_CHECK).read_text(encoding="utf-8"),
+                                lambda path: (ROOT / path).read_text(encoding="utf-8"))
+    if problems:
+        for problem in problems:
+            say(f"FAILED: {problem}")
+        return 1
+    for flag, value, _, target, source, _ in NO_CODE_ON:
+        if chosen_flags.get(flag) != value:
+            continue
+        targets.remove(target)
+        say(f"{target}: not type-checked, {flag}={value} refuses itself there ({source})")
+    say("targets: " + ", ".join(targets))
 
     nightly = nightly_uses([directory for _, directory in chosen])
     if nightly:
@@ -250,17 +308,16 @@ def main() -> int:
                  "--message-format=json", "--target-dir", str(target_dir)]
     for name, _ in chosen:
         arguments += ["-p", name]
-    for target in KERNEL_TARGETS:
+    for target in targets:
         arguments += ["--target", target]
     # The flags a kernel manifest keys a dependency table on, as rustc's cfgs
     # (docs/microkernel/CORE-WITHOUT-EXTENSIONS.md section 2; xtask's
     # cargo.rs gives its own builds the same): src/kernel/build.rs refuses a
     # build where they differ from FERRIX_BUILD_FLAGS.
-    chosen_flags = dict(word.split("=", 1) for word in os.environ.get("FERRIX_BUILD_FLAGS", "").split())
     cfgs = ",".join(f'"--cfg","ferrix_{flag}=\\"{chosen_flags[flag]}\\""'
                     for flag in MANIFEST_FLAGS if flag in chosen_flags)
     if cfgs:
-        for target in KERNEL_TARGETS:
+        for target in targets:
             arguments += ["--config", f"target.{target}.rustflags=[{cfgs}]"]
     process = subprocess.Popen(arguments, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
@@ -297,15 +354,51 @@ def main() -> int:
     for (where, text), times in errors.items():
         path = where.rsplit(":", 1)[0]
         say(f"{where} ({ring_of_file(path, kernel_rings, crate_rings)}): {text}"
-            f" [{times} of the {len(KERNEL_TARGETS)} targets' builds]")
+            f" [{times} of the {len(targets)} targets' builds]")
     if status != 0 or errors:
         say(f"FAILED: {len(errors)} distinct error(s) under Rust {RUST}, Ferrocene {FERROCENE_RELEASE}'s "
             f"(cargo exited {status}); a feature newer than Ferrocene's is in the item's build")
         return 1
+    skipped = [target for target in KERNEL_TARGETS if target not in targets]
+    said = f", {', '.join(skipped)} not checked (NO_CODE_ON)" if skipped else ""
     say(f"PASSED: the kernel and the item's crates build with Rust {RUST} on "
-        f"{len(KERNEL_TARGETS)} targets ({warnings} warning(s), not failed)")
+        f"{len(targets)} targets ({', '.join(targets)}{said}; {warnings} warning(s), not failed)")
+    return 0
+
+
+def self_test() -> int:
+    """`NO_CODE_ON`'s judge on planted texts (ledger 10948 N1-N3): the tree's
+    own holds; each plant -- the refusal's text gone, its cfg line changed
+    with the sentence kept, the architecture given to `built_on`, xtask's
+    entry gone -- is a problem, named."""
+    source = NO_CODE_ON[0][4]
+    flags = (ROOT / FLAG_FILE).read_text(encoding="utf-8")
+    xtask = (ROOT / XTASK_CHECK).read_text(encoding="utf-8")
+    tree_text = (ROOT / source).read_text(encoding="utf-8")
+    real = {source: tree_text}
+    assert no_code_problems(flags, xtask, real.__getitem__) == [], "the tree's own excuse"
+    refusal = NO_CODE_ON[0][5]
+    cfg_line, sentence = refusal.split("\n", 1)
+    gone = {source: tree_text.replace(sentence, "compile_error!(\"elsewhere")}
+    moved = {source: tree_text.replace(refusal, "#[cfg(all(ferrix_schedule = \"windows\", ferrix_checks = \"on\"))]\n" + sentence)}
+    for name, tree in (("refusal gone", gone), ("cfg changed", moved)):
+        problems = no_code_problems(flags, xtask, tree.__getitem__)
+        assert len(problems) == 1 and "no longer holds" in problems[0], (name, problems)
+    flag, value = NO_CODE_ON[0][0], NO_CODE_ON[0][1]
+    line = re.compile(rf'^(values\.{value} = \{{.*?built = "[a-z]+", )(built_on = \[[^]]*\], )?', re.M)
+    section = flags.index(f"[flags.{flag}]")
+    head, tail = flags[:section], flags[section:]
+    widened = head + line.sub(r'\1built_on = ["aarch64", "armv7a"], ', tail, count=1)
+    assert widened != flags, "the planted built_on found no line of the value"
+    problems = no_code_problems(widened, xtask, real.__getitem__)
+    assert len(problems) == 1 and "built_on" in problems[0], problems
+    problems = no_code_problems(flags, xtask.replace("Arch::Armv7a)]", "Arch::X86_64)]"), real.__getitem__)
+    assert len(problems) == 1 and "NO_CODE_ON lacks" in problems[0], problems
+    say("self-test: NO_CODE_ON's judge holds the tree's excuse and names each of 4 plants")
     return 0
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--self-test"]:
+        sys.exit(self_test())
     sys.exit(main())

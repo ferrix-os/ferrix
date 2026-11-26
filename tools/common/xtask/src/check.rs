@@ -323,6 +323,8 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
             ],
             &["tools/common/check/check-stack-depth.py", "--self-test"],
             &["tools/common/check/check-native-stacks.py", "--self-test"],
+            // NO_CODE_ON's excuse of a target, with its plants (ledger 10948 N1-N3).
+            &["tools/common/check/check-ferrocene-rust.py", "--self-test"],
         ],
     ),
     // Product signing's verifier is proved by host tests: their statement
@@ -3126,7 +3128,20 @@ fn lint_one_setting(
     lint_dir: &str,
     resolved: &crate::flags::Resolved,
 ) -> (String, Result<()>) {
-    let mut arguments = every_arch.to_vec();
+    let skipped = no_code_on(resolved);
+    let mut arguments: Vec<&str> = Vec::new();
+    let mut words = every_arch.iter();
+    while let Some(word) = words.next() {
+        if *word == "--target"
+            && let Some(target) = words.next()
+        {
+            if !skipped.iter().any(|arch| arch.kernel_target() == *target) {
+                arguments.extend(["--target", target]);
+            }
+        } else {
+            arguments.push(word);
+        }
+    }
     arguments.extend(["--target-dir", lint_dir]);
     // The flags a manifest keys a table on, as rustc's `cfg`s (cargo.rs).
     let configs = cargo::manifest_cfg_configs(resolved);
@@ -3135,7 +3150,33 @@ fn lint_one_setting(
     }
     let mut environment = cargo::flag_environment(resolved).to_vec();
     environment.push(("CARGO_INCREMENTAL", "0".to_owned()));
-    clippy_captured(&arguments, &environment)
+    let (said, result) = clippy_captured(&arguments, &environment);
+    let mut told = String::new();
+    for arch in skipped {
+        told.push_str(&format!(
+            "   {}: not linted, its values' code refuses itself there by compile_error! (NO_CODE_ON)\n",
+            arch.kernel_target()
+        ));
+    }
+    (told + &said, result)
+}
+
+/// A value whose code refuses itself on an architecture by `compile_error!`: a
+/// setting carrying it is linted on the other architectures alone. The same
+/// entries as `check-ferrocene-rust.py`'s `NO_CODE_ON`, which holds the two
+/// equal, the refusal's `cfg` and text in the tree, and the architecture
+/// outside the value's `built_on` (ledger 10948 N1-N2). `schedule=windows` has
+/// no ARMv7-A code (K9 §4, ledger 7549 WY.13), so `max` is linted on x86-64
+/// and AArch64.
+pub(crate) const NO_CODE_ON: [(&str, &str, Arch); 1] = [("schedule", "windows", Arch::Armv7a)];
+
+/// The architectures `NO_CODE_ON` excuses a setting from.
+fn no_code_on(resolved: &crate::flags::Resolved) -> Vec<Arch> {
+    NO_CODE_ON
+        .iter()
+        .filter(|(flag, value, _)| resolved.value(flag) == Some(*value))
+        .map(|(_, _, arch)| *arch)
+        .collect()
 }
 
 /// Where one of the kernel's flag settings is linted: a directory of its own
