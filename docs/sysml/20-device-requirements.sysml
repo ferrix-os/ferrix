@@ -1531,5 +1531,17 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.STORE.7";
             attribute :>> unit = "fallible::insert";
         }
+        requirement <'L.device.88'> everyDeviceWithinTheHandleLimit : ItemLowLevel {
+            attribute :>> statement = "The kernel shall give devmgr every device it gives it
+                in as many DEVICES messages as the channel's handle limit needs, and no
+                DEVICES message shall carry more handles than a channel takes.";
+            attribute :>> criterion = "test-driver-model on a personality=user kernel: a
+                device-tree boot of QEMU virt hands devmgr 44 devices, devmgr starts and the
+                test's device is served. With the first message's room counted as before
+                (two of its channels left out) the boot reads that DEVICES could not be
+                written to devmgr's channel, and devmgr does not start.";
+            attribute :>> parent = "H.DEV.12";
+            attribute :>> unit = "discovery::devmgr::write_devices";
+        }
     }
 }

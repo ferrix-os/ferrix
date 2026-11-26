@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "347f0c540a90e4a055b4465dd6ade88222135871fde5b3c2fd24c8e566a38205",
+  "digest": "c0878d6db27e6bde2b22c894ac068f9b4040319456d90d93259de01db3eb0a90",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 168,
-    "elements": 10475,
+    "elements": 10480,
     "maturity": {
       "implemented": 296,
       "inProgress": 23,
@@ -102373,6 +102373,63 @@
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 1532
+                  }
+                }
+              ]
+            },
+            {
+              "name": "everyDeviceWithinTheHandleLimit",
+              "qualifiedName": "FerrixDeviceRequirements::GenericNodes::everyDeviceWithinTheHandleLimit",
+              "kind": "requirement",
+              "shortName": "L.device.88",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 1534
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::everyDeviceWithinTheHandleLimit",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The kernel shall give devmgr every device it gives it in as many DEVICES messages as the channel's handle limit needs, and no DEVICES message shall carry more handles than a channel takes.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1537
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::everyDeviceWithinTheHandleLimit",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"test-driver-model on a personality=user kernel: a device-tree boot of QEMU virt hands devmgr 44 devices, devmgr starts and the test's device is served. With the first message's room counted as before (two of its channels left out) the boot reads that DEVICES could not be written to devmgr's channel, and devmgr does not start.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1542
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::everyDeviceWithinTheHandleLimit",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DEV.12\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1543
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::GenericNodes::everyDeviceWithinTheHandleLimit",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"discovery::devmgr::write_devices\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1544
                   }
                 }
               ]

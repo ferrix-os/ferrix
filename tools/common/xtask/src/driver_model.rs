@@ -348,6 +348,7 @@ fn boot(arch: Arch, args: &Args, image: &Path, kernel: &Path, row: Row) -> Resul
 /// The check.
 ///
 /// Verifies: H.DEV.7, L.device.64
+/// Verifies: L.device.88
 fn test_driver_model(args: &Args) -> Result<()> {
     // Generic publication is `personality=user`'s (`docs/microkernel/K8.md`
     // §7): a hybrid publishes no generic node, so the row is refused there by

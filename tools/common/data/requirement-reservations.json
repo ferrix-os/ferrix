@@ -13,15 +13,6 @@
   "reservations": [
     {
       "ids": [
-        "L.device.88"
-      ],
-      "owner": "sebastian-27e",
-      "branch": "mk-e/m5-debts",
-      "date": "2026-11-26",
-      "purpose": "The kernel gives devmgr every published device in as many DEVICES messages as the channel's handle limit needs, none carrying more handles than a channel takes; unit write_devices (consultant ledger 10162 E1, allotted by the coordinator in mk-allot.md)"
-    },
-    {
-      "ids": [
         "L.user.230-234",
         "L.object.373"
       ],

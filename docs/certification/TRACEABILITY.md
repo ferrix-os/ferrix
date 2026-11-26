@@ -15,7 +15,7 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 196 | 141 | 55 |
-| Low (`L.*`) | 1552 | 1271 | 281 |
+| Low (`L.*`) | 1553 | 1272 | 281 |
 
 3575 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
@@ -2134,6 +2134,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.device.80` | What a needs_certified node's vector, I/O mapping and pin give shall carry no TRANSFER. | object::grant_check. | H.DEV.11 | `device::DeviceNode::derived_rights` | `src/kernel/src/object/grant_check.rs::run` | not built | not built | not built |
 | `L.device.86` | A block ring's write shall copy each request's bytes, at most what the device takes at once and never above 128 KiB, into the heap fallibly; when the heap refuses, into one of two payloads the disk keeps for its life, lent until the request leaves its requests map; and when both are lent, wait for one at most a bounded time, then answer ENOMEM. | block_ring::offline_check::reserve, on a disk no ring serves with the heap's refusals injected on the writing task: a refused copy is served from the reserve with the caller's bytes and queued; with both lent, a third answers ENOMEM once its wait is over and within half a second of it; a collected write and an abandoned one answered later each give their payload back, lent and free always two. The ring's code is load code, which cannot be a unit (check-traceability refuses it); the unit is the item's half, the deadline wait it sleeps in. | H.STORE.7 | `sched::wait::WaitQueue::wait_until_deadline` | `src/kernel/extensions/personality/linux/src/interfaces/block_ring/offline_check.rs::run` | not built | not built | not built |
 | `L.device.87` | A block ring request whose entry in the requests map cannot be made shall be refused with ENOMEM before it is queued, leaving nothing the ring could dispatch and giving back a reserved payload it held. | block_ring::offline_check::reserve: with the entry's allocation refused, the submit answers ENOMEM, the queue and the map hold what they held before, and the reserve is all free. The unit is the item's fallible insert the entry is made with; the ring's code is load code. | H.STORE.7 | `fallible::insert` | `src/kernel/extensions/personality/linux/src/interfaces/block_ring/offline_check.rs::run` | not built | not built | not built |
+| `L.device.88` | The kernel shall give devmgr every device it gives it in as many DEVICES messages as the channel's handle limit needs, and no DEVICES message shall carry more handles than a channel takes. | test-driver-model on a personality=user kernel: a device-tree boot of QEMU virt hands devmgr 44 devices, devmgr starts and the test's device is served. With the first message's room counted as before (two of its channels left out) the boot reads that DEVICES could not be written to devmgr's channel, and devmgr does not start. | H.DEV.12 | `discovery::devmgr::write_devices` | `tools/common/xtask/src/driver_model.rs::test_driver_model` | xtask gate | xtask gate | xtask gate |
 
 ### Switch
 
@@ -3869,6 +3870,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/container.rs::run` | gate | L.object.370 |
 | `tools/common/xtask/src/dma_faults.rs::amdvi_faults_are_counted_by_page` | gate | L.iommu.90 |
 | `tools/common/xtask/src/driver_model.rs::test_driver_model` | gate | H.DEV.7, L.device.64 |
+| `tools/common/xtask/src/driver_model.rs::test_driver_model` | gate | L.device.88 |
 | `tools/common/xtask/src/exit_regions.rs::test` | gate | L.user.247 |
 | `tools/common/xtask/src/init.rs::audit_read_back` | gate | H.AUD.10 |
 | `tools/common/xtask/src/init.rs::checks_skipped` | gate | H.AUD.12 |

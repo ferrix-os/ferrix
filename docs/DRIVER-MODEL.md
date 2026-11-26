@@ -528,21 +528,30 @@ real tree's L.device.62). Its statements H.DEV.7-8, L.discovery.8-12, L.device.6
 V-19 and CLAIM's ARMv7-A sentence hold where publication is on; the made-up-tree
 checks and their one `generic` line run in every profile.
 
-**2026-11-26 (n27e): `test-driver-model` runs on a `personality=user` kernel, on
-AArch64.** `--personality user`, and `fast`, which carries it, pass the row on
-QEMU `virt` under TCG: the PL031 served under `ferrix,test-seconds` on the kernel
-ELF hashed before the test, and refused with its clock's provider gone. A hybrid is
-refused by name, so the row never goes green on a kernel that publishes nothing (C.2).
-`max` is not buildable, so this is not `max`'s row yet; the image is the test's own,
-not `fast`'s slotted one. Two things the first run found: devmgr's kernel start
-counted two of the four handles the first DEVICES message carries under
-`personality=user` beside its devices (the debug log and the cores' channel, not the
-block and `netd` channels added since), so a device-tree boot's 44 nodes overfilled
-that message and devmgr did not start ("DEVICES could not be written to devmgr's
-channel"); the room is now the message's own `handles` count. And the test's image
-had no init, whose end under `personality=user` is the machine's, before the match
-interrupt: pid 1 is a script that waits (`ferrix.init=`). `gate-rows` asks the row of
-generic publication, devmgr's kernel start, devmgr's generic match, `testseconds`
-and the test. The real tree's L.device.62: the published `/pmu`'s private line
-refused, the PL031's SPI minted and its match interrupt taken by the driver.
-Rows, controls and the review are in the commit.
+**2026-11-26 (n27e, ledger 10162): `test-driver-model` runs on a `personality=user`
+kernel, on AArch64.** The customer's rule of 2026-10-25 is shown on QEMU `virt` under
+TCG by a kernel built with `--personality user`, and by one built with `fast`'s values,
+each in the test's own image (not `fast`'s loader or its signed slot), with the test's
+own driver; on no board, and with no claim. `max` does not build yet, so this is not
+`max`'s row. The PL031 is served under `ferrix,test-seconds` on the kernel ELF hashed
+before the test, and refused with its clock's provider gone; a hybrid is refused by
+name, so the row never goes green on a kernel that publishes nothing (C.2). The first
+runs found F-123: under `personality=user` devmgr's first DEVICES message left out
+two of the channels it carries when it counted its room, so a device-tree boot's 44
+devices overfilled it and devmgr did not start; the room is now the message's own
+`handles` count, and L.device.88 states the rule. And the test's image had no init,
+whose end under `personality=user` is the machine's, before the match interrupt: pid
+1 is a script that waits (`ferrix.init=`). `gate-rows` asks the row of generic
+publication, devmgr's kernel start, devmgr's generic match, `testseconds` and the
+test. The real tree's L.device.62: the published `/pmu`'s private line refused, the
+PL031's SPI minted and its match interrupt taken by the driver.
+
+dm4-c11 (6452 K.3) stays open. On a user kernel the windows early boot mapped are
+claimed as the kernel's at more than one site: by `device::begin`'s
+`claim_early_windows`, and by `claim_tree_uses`, which claims `Reserved`'s ranges, to
+which `Reserved::new` adds the early windows (`device.rs`), as well as the console's
+node (`claim_accessor_nodes`) and every device window then mapped. With `begin`'s
+claim taken out the control did not fire (`n27e-c11`), nor with `Reserved`'s entry
+taken out too (`n27e-c11-two`, on the side commit 0401f0215): the property holds
+by a third registration, so no control of one or two sites shows the check reading
+it. A control for it is a BACKLOG row.
