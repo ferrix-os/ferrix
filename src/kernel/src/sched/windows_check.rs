@@ -509,12 +509,32 @@ fn print_log(epoch: u64) {
 }
 
 /// A spinner: waits to be put in its partition and woken, then samples for [`RUN`].
+static TR_START: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
+static TR_SPAWNED: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
+static TR_WOKE: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
+static TR_CPU: [AtomicU64; THREADS] = [const { AtomicU64::new(99) }; THREADS];
+static TR_END: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
+static TR_ENDCPU: [AtomicU64; THREADS] = [const { AtomicU64::new(99) }; THREADS];
+fn tr_cpu() -> u64 {
+    super::current().map_or(98, |task| task.cpu() as u64)
+}
 fn spinner(index: usize) {
+    if let Some(at) = TR_SPAWNED.get(index) {
+        at.store(crate::timer::now_nanos(), Ordering::Relaxed);
+    }
     super::sleep_for(10_000 * MS);
     let until = crate::timer::now_nanos() + RUN;
+    if let (Some(at), Some(cpu)) = (TR_START.get(index), TR_CPU.get(index)) {
+        at.store(until - RUN, Ordering::Relaxed);
+        cpu.store(tr_cpu(), Ordering::Relaxed);
+    }
     while crate::timer::now_nanos() < until {
         sample(index);
         core::hint::spin_loop();
+    }
+    if let (Some(at), Some(cpu)) = (TR_END.get(index), TR_ENDCPU.get(index)) {
+        at.store(crate::timer::now_nanos(), Ordering::Relaxed);
+        cpu.store(tr_cpu(), Ordering::Relaxed);
     }
 }
 
@@ -1038,7 +1058,10 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     frame_on(held, cpus)?;
     HELD.store(held, Ordering::Release);
     let unkicked = windows::unkicked();
-    for task in &threads {
+    for (index, task) in threads.iter().enumerate() {
+        if let Some(at) = TR_WOKE.get(index) {
+            at.store(crate::timer::now_nanos(), Ordering::Relaxed);
+        }
         super::wake(task);
     }
     if crate::timer::now_nanos() >= EPOCH.load(Ordering::Acquire) {
@@ -1060,6 +1083,26 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
     // The main case judged as it ends (ledger 7663 follow-up): its arms and its samples, before
     // the kick cases, so that a fault planted in the pick or the arm fails by its own sentence
     // rather than by a kick case's that it also breaks.
+    {
+        let epoch = EPOCH.load(Ordering::Acquire) as i64;
+        let rel = |at: &[AtomicU64; THREADS], index: usize| load(at, index) as i64 - epoch;
+        for index in 0..THREADS {
+            crate::println!(
+                "  wtrace   {} spawned {} woke {} start {} cpu {} end {} cpu {} first {} last {} inside {} (ns from epoch; held {})",
+                NAMES.get(index).copied().unwrap_or("?"),
+                rel(&TR_SPAWNED, index),
+                rel(&TR_WOKE, index),
+                rel(&TR_START, index),
+                load(&TR_CPU, index),
+                rel(&TR_END, index),
+                load(&TR_ENDCPU, index),
+                rel(&FIRST, index),
+                rel(&LAST, index),
+                load(&INSIDE, index),
+                held
+            );
+        }
+    }
     judge_arms(ARMS.load(Ordering::Acquire))?;
     let judged = judge_samples()?;
     // The other half (WX.6): with the spinners gone and the held processor idle, a wake of a
