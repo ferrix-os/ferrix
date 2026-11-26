@@ -644,6 +644,21 @@ pub fn stage_on_devices() {
     println!("  item dev {cases} cases of the native calls on the device nodes");
 }
 
+/// `devmgr` and its drivers are started in `drivers.slice`: a job beside the
+/// slice ran the drivers outside it (F-121). Asked by `devmgr::devmgr_job` on
+/// both paths that start `devmgr`, the kernel's and a user kernel's, every
+/// checked boot; it stops the boot by name.
+///
+/// Verifies: L.object.344
+pub(crate) fn check_one_slice(job: &Job) {
+    if job.name() != Some(devmgr::DRIVERS_JOB) {
+        fatal!(
+            catalog::STAGE10_DEVMGR,
+            "devmgr's drivers would run outside drivers.slice"
+        );
+    }
+}
+
 /// `drivers.slice`, once what starts it has run.
 pub fn stage_drivers_sealed() {
     if !crate::checks::run() {

@@ -463,7 +463,7 @@ pub fn start() -> Result<Option<Report>, &'static str> {
     let devices = write_devices(
         &kernel_end,
         files.images()?,
-        drivers_job()?,
+        devmgr_job()?,
         None,
         None,
         None,
@@ -514,7 +514,7 @@ pub(crate) fn start_detached(
     };
     let (messages, devmgr_end) = Endpoint::pair().map_err(|_| "no memory for devmgr's channel")?;
     let (cores, devmgr_cores) = Endpoint::pair().map_err(|_| "no memory for the cores' channel")?;
-    let job = drivers_job()?;
+    let job = devmgr_job()?;
     let (net_cores, netd_cores) = Endpoint::pair().map_err(|_| "no memory for netd's channel")?;
     // `netd`'s first read on this channel: the further partitions' ends, by this
     // channel so that `devmgr` carries one handle however many partitions there are.
@@ -1062,9 +1062,10 @@ pub fn make_drivers_job() -> Result<(), &'static str> {
     Ok(())
 }
 
-/// `drivers.slice` under `ferrix.devmgr=init`, held for the life of the
-/// machine: a job's parent holds it only weakly, and on the kernel path it is
-/// `devmgr` that holds it.
+/// `drivers.slice` under `ferrix.devmgr=init`, or as stage 10's check made it
+/// ahead of a user kernel's `devmgr`, held for the life of the machine: a
+/// job's parent holds it only weakly, and on the kernel path it is `devmgr`
+/// that holds it. [`drivers_job`] answers it while it is held.
 static DRIVERS_KEPT: SpinLock<Option<Arc<Job>>> = SpinLock::new(None);
 
 /// Whether the one starter there is has been given out.
@@ -1394,24 +1395,33 @@ pub fn published(location: Location) {
     let _ = channel.write(Sender::KERNEL, bytes, 0, || Ok::<_, Infallible>(Vec::new()));
 }
 
-/// The name of the job `devmgr` is given, beneath the root job:
-/// `docs/CGROUPS.md` §2.1, and the slice `docs/INIT.md` §5.1 shows drivers in.
-const DRIVERS_JOB: &str = "drivers.slice";
-
-/// The job `devmgr` makes each driver's job under, named [`DRIVERS_JOB`] in
-/// the root job so that cgroupfs shows the drivers there.
-///
-/// A second start, which a boot never makes, finds the name taken and gets an
-/// anonymous job in its place rather than none.
-///
-/// # Errors
-///
-/// When there was no memory for any job at all.
 /// What the drivers' job has for its kernel objects, until a description says (K16 §4).
 #[cfg(ferrix_kernel_memory = "retyped")]
 const DRIVERS_RESERVATION: u64 = 64 << 20;
 
+/// The name of the job `devmgr` is given, beneath the root job:
+/// `docs/CGROUPS.md` §2.1, and the slice `docs/INIT.md` §5.1 shows drivers in.
+pub(crate) const DRIVERS_JOB: &str = "drivers.slice";
+
+/// The job `devmgr` makes each driver's job under, named [`DRIVERS_JOB`] in
+/// the root job so that cgroupfs shows the drivers there.
+///
+/// The slice [`make_drivers_job`] made ahead of its `devmgr` is that `devmgr`'s:
+/// on a user kernel stage 10's check makes it before `devmgr` starts, and a
+/// second job beside it ran the drivers outside `drivers.slice` while the check
+/// read a slice nothing ran in, and under `kernel_memory=retyped` held a second
+/// promise nobody drew (F-121). With none kept, a second start, which a boot
+/// never makes, finds the name taken and gets an anonymous job in its place
+/// rather than none, as does a named child refused for memory: under checks
+/// [`devmgr_job`] stops the boot on either.
+///
+/// # Errors
+///
+/// When there was no memory for any job at all.
 fn drivers_job() -> Result<Arc<Job>, &'static str> {
+    if let Some(kept) = DRIVERS_KEPT.lock().as_ref() {
+        return Ok(Arc::clone(kept));
+    }
     let root = job::root();
     let job = root
         .new_named_child_as(DRIVERS_JOB, job::Budget::Own, true)
@@ -1425,6 +1435,20 @@ fn drivers_job() -> Result<Arc<Job>, &'static str> {
     #[cfg(ferrix_kernel_memory = "retyped")]
     job.set_reservation(DRIVERS_RESERVATION)
         .map_err(|_| "no reservation for the drivers' job")?;
+    Ok(job)
+}
+
+/// The job a `devmgr` is started in: [`drivers_job`]'s, held to `drivers.slice`
+/// under checks (`syscall::rehome_check::check_one_slice`, F-121).
+///
+/// # Errors
+///
+/// As [`drivers_job`].
+fn devmgr_job() -> Result<Arc<Job>, &'static str> {
+    let job = drivers_job()?;
+    if crate::checks::run() {
+        crate::syscall::rehome_check::check_one_slice(&job);
+    }
     Ok(job)
 }
 

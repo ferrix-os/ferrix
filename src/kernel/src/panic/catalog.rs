@@ -2444,7 +2444,8 @@ pub static RELEASE: Explanation = Explanation {
     see: "src/kernel/extensions/personality/linux/src/fs/release_check.rs; docs/RAM-RELEASE.md §2",
 };
 
-/// For `check_devmgr` in `main.rs`, when `devmgr::start` fails.
+/// For `check_devmgr` in `main.rs`, when `devmgr::start` fails, and for
+/// `devmgr::check_one_slice` on either path that starts devmgr.
 pub static STAGE10_DEVMGR: Explanation = Explanation {
     code: "FX-1006",
     title: "devmgr could not be started, or did not report",
@@ -2461,6 +2462,8 @@ pub static STAGE10_DEVMGR: Explanation = Explanation {
         "devmgr exited before reporting: its exit status names the step (see `src/user/system/native/devmgr`).",
         "devmgr reported nothing within twenty seconds: a driver did not bring its device up, \
          or the kernel never sent PUBLISHED for a disk it accepted.",
+        "devmgr would have been started in a job other than `drivers.slice`: \
+         `devmgr::drivers_job` made a job beside the slice it keeps (F-121).",
     ],
     see: "src/kernel/src/discovery/devmgr.rs; src/user/system/native/devmgr/src/main.rs; docs/DEVMGR.md; docs/ROADMAP.md \
           stage 10",

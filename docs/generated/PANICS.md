@@ -3678,6 +3678,8 @@ whose driver died. The boot's block drivers come from it from then on.
    `src/user/system/native/devmgr`).
 4. devmgr reported nothing within twenty seconds: a driver did not bring its
    device up, or the kernel never sent PUBLISHED for a disk it accepted.
+5. devmgr would have been started in a job other than `drivers.slice`:
+   `devmgr::drivers_job` made a job beside the slice it keeps (F-121).
 
 See: src/kernel/src/discovery/devmgr.rs;
 src/user/system/native/devmgr/src/main.rs; docs/DEVMGR.md; docs/ROADMAP.md stage

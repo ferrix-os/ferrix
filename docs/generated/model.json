@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "b0077ff4d6d2cb1b2541eccacb5ea92c4fe85f18ca2740a74ce2eb9a9e5e6708",
+  "digest": "81f6f3454f7f679cfd842e84cc4154b87522c634d79efdc564e749b1bccf013e",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 168,
-    "elements": 10485,
+    "elements": 10490,
     "maturity": {
       "implemented": 296,
       "inProgress": 23,
@@ -47264,234 +47264,291 @@
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 4175
                   }
-                }
-              ]
-            },
-            {
-              "name": "aFurtherPartitionHoldsItsRow",
-              "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
-              "kind": "requirement",
-              "shortName": "L.object.346",
-              "type": "ItemLowLevel",
-              "source": {
-                "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4177
-              },
-              "children": [
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
-                  "kind": "attribute",
-                  "redefines": "statement",
-                  "value": "\"A further Linux partition shall be started in a job and a region of its own with the FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4179
-                  }
                 },
                 {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
-                  "kind": "attribute",
-                  "redefines": "criterion",
-                  "value": "\"test-partitions: a second partition runs programs and ends, and one that dies at once, the first going on; Rows::judge at its start; the first's end ends the machine, shown.\"",
+                  "name": "theDriversRunInTheirSlice",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
+                  "kind": "requirement",
+                  "shortName": "L.object.344",
+                  "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4181
-                  }
+                    "line": 4176
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"devmgr shall be started in drivers.slice, the one job a boot makes of that name, on the kernel's path and on a user kernel's.\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4178
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"syscall::rehome_check::check_one_slice, asked by devmgr_job on every checked boot that starts devmgr: the job is drivers.slice; its control, the kept slice not answered, FIRED on a user kernel on x86_64 KVM and AArch64 TCG (n27b-s-ctl-x86, n27b-s-ctl-a64).\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4181
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.OBJ.22\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4182
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::theDriversRunInTheirSlice",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "(\"discovery::devmgr::drivers_job\", \"discovery::devmgr::devmgr_job\")",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4183
+                      }
+                    }
+                  ]
                 },
                 {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
-                  "kind": "attribute",
-                  "redefines": "parent",
-                  "value": "\"H.DEV.13\"",
+                  "name": "aFurtherPartitionHoldsItsRow",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
+                  "kind": "requirement",
+                  "shortName": "L.object.346",
+                  "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4182
-                  }
+                    "line": 4185
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"A further Linux partition shall be started in a job and a region of its own with the FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4187
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"test-partitions: a second partition runs programs and ends, and one that dies at once, the first going on; Rows::judge at its start; the first's end ends the machine, shown.\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4189
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.DEV.13\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4190
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aFurtherPartitionHoldsItsRow",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "\"linuxd_start::start_further\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4191
+                      }
+                    }
+                  ]
                 },
                 {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
-                  "kind": "attribute",
-                  "redefines": "unit",
-                  "value": "\"linuxd_start::start_further\"",
+                  "name": "eachPartitionASpeculationDomain",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
+                  "kind": "requirement",
+                  "shortName": "L.object.347",
+                  "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4183
-                  }
-                }
-              ]
-            },
-            {
-              "name": "eachPartitionASpeculationDomain",
-              "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
-              "kind": "requirement",
-              "shortName": "L.object.347",
-              "type": "ItemLowLevel",
-              "source": {
-                "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4185
-              },
-              "children": [
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
-                  "kind": "attribute",
-                  "redefines": "statement",
-                  "value": "\"With more than one Linux partition, each shall be a speculation domain of its own.\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4186
-                  }
+                    "line": 4193
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"With more than one Linux partition, each shall be a speculation domain of its own.\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4194
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED.\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4195
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.DEV.13\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4196
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::eachPartitionASpeculationDomain",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "\"linuxd_start::start\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4197
+                      }
+                    }
+                  ]
                 },
                 {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
-                  "kind": "attribute",
-                  "redefines": "criterion",
-                  "value": "\"test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED.\"",
+                  "name": "aHeapChargeReclaimsFirst",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
+                  "kind": "requirement",
+                  "shortName": "L.object.370",
+                  "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4187
-                  }
+                    "line": 4199
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"A kernel-heap charge refused at a job's memory limit, made for the running task's own job where it may block and not inside a reclaim, shall first reclaim clean cache charged to the job whose limit is full or beneath it and then be tried once more. In linuxd (the lift) such a charge shall be refused without a reclaim, as before: the lift's may_block answers yes whatever is held, so the charge could not tell a context holding a spin lock from one holding none.\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4206
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"test-container's heap-reclaim step: at memory.max beside the cgroup's file cache, 128 opens of memory.events held and a read given, pgscan moving, and the file's own mapping reading as before once its pages were taken down and filled again; with the reclaim taken out the step fails on its refusal sentence (mki3f-c1, FIRED).\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4211
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.QUOTA.7\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4212
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aHeapChargeReclaimsFirst",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "(\"object::quota::KernelHeap::charge\", \"object::oom::reclaim_within\", \"sched::heap_charge_may_reclaim\")",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4214
+                      }
+                    }
+                  ]
                 },
                 {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
-                  "kind": "attribute",
-                  "redefines": "parent",
-                  "value": "\"H.DEV.13\"",
+                  "name": "aReclaimNeverNests",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
+                  "kind": "requirement",
+                  "shortName": "L.object.371",
+                  "type": "ItemLowLevel",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4188
-                  }
-                },
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::eachPartitionASpeculationDomain",
-                  "kind": "attribute",
-                  "redefines": "unit",
-                  "value": "\"linuxd_start::start\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4189
-                  }
-                }
-              ]
-            },
-            {
-              "name": "aHeapChargeReclaimsFirst",
-              "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
-              "kind": "requirement",
-              "shortName": "L.object.370",
-              "type": "ItemLowLevel",
-              "source": {
-                "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4191
-              },
-              "children": [
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
-                  "kind": "attribute",
-                  "redefines": "statement",
-                  "value": "\"A kernel-heap charge refused at a job's memory limit, made for the running task's own job where it may block and not inside a reclaim, shall first reclaim clean cache charged to the job whose limit is full or beneath it and then be tried once more. In linuxd (the lift) such a charge shall be refused without a reclaim, as before: the lift's may_block answers yes whatever is held, so the charge could not tell a context holding a spin lock from one holding none.\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4198
-                  }
-                },
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
-                  "kind": "attribute",
-                  "redefines": "criterion",
-                  "value": "\"test-container's heap-reclaim step: at memory.max beside the cgroup's file cache, 128 opens of memory.events held and a read given, pgscan moving, and the file's own mapping reading as before once its pages were taken down and filled again; with the reclaim taken out the step fails on its refusal sentence (mki3f-c1, FIRED).\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4203
-                  }
-                },
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
-                  "kind": "attribute",
-                  "redefines": "parent",
-                  "value": "\"H.QUOTA.7\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4204
-                  }
-                },
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aHeapChargeReclaimsFirst",
-                  "kind": "attribute",
-                  "redefines": "unit",
-                  "value": "(\"object::quota::KernelHeap::charge\", \"object::oom::reclaim_within\", \"sched::heap_charge_may_reclaim\")",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4206
-                  }
-                }
-              ]
-            },
-            {
-              "name": "aReclaimNeverNests",
-              "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
-              "kind": "requirement",
-              "shortName": "L.object.371",
-              "type": "ItemLowLevel",
-              "source": {
-                "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4208
-              },
-              "children": [
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
-                  "kind": "attribute",
-                  "redefines": "statement",
-                  "value": "\"A reclaim begun inside a reclaim of the same task shall stop the machine (FX-0973).\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4210
-                  }
-                },
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
-                  "kind": "attribute",
-                  "redefines": "criterion",
-                  "value": "\"With KernelHeap's guard taken out and a refused charge planted at the head of the reclaim, test-container stops as FX-0973, 'a reclaim began inside a reclaim' (mki3f-c2, FIRED).\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4213
-                  }
-                },
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
-                  "kind": "attribute",
-                  "redefines": "parent",
-                  "value": "\"H.QUOTA.7\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4214
-                  }
-                },
-                {
-                  "name": "",
-                  "qualifiedName": "FerrixObjectRequirements::Pagers::aReclaimNeverNests",
-                  "kind": "attribute",
-                  "redefines": "unit",
-                  "value": "\"user::cache::reclaim\"",
-                  "source": {
-                    "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4215
-                  }
+                    "line": 4216
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"A reclaim begun inside a reclaim of the same task shall stop the machine (FX-0973).\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4218
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"With KernelHeap's guard taken out and a refused charge planted at the head of the reclaim, test-container stops as FX-0973, 'a reclaim began inside a reclaim' (mki3f-c2, FIRED).\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4221
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.QUOTA.7\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4222
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixObjectRequirements::Pagers::aCopyRefusedForMemorySaysSo::aReclaimNeverNests",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "\"user::cache::reclaim\"",
+                      "source": {
+                        "file": "docs/sysml/14-object-requirements.sysml",
+                        "line": 4223
+                      }
+                    }
+                  ]
                 }
               ]
             }
@@ -100785,10 +100842,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::driversSliceIsSealed",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"drivers_job shall make drivers.slice sealed on each of its three paths, so that devmgr and every driver's job beneath it are sealed.\"",
+                  "value": "\"drivers_job shall answer a sealed job on each of its four paths, the slice kept, a new named child, an anonymous child and a root of its own, so that devmgr and every driver's job beneath it are sealed.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1135
+                    "line": 1136
                   }
                 },
                 {
@@ -100796,10 +100853,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::driversSliceIsSealed",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"The sysfs check, once devmgr has reported (or, under ferrix.devmgr=init, before init has started it): drivers.slice and every job beneath it read as sealed. A boot exercises drivers_job's first path, the named child, only; the second and third, for a name taken or no memory, rest on their argued coverage entries. And with kernel objects alone, on every profile, the `drv jobs` line (syscall/rehome_check.rs::check_drivers_sealed), which fails a missing slice on a boot whose devmgr bound a driver and makes one on a boot with none.\"",
+                  "value": "\"The sysfs check, once devmgr has reported (or, under ferrix.devmgr=init, before init has started it): drivers.slice and every job beneath it read as sealed. A boot exercises the first two paths: a new named child where devmgr is started first (the kernel's path), and the slice kept where stage 10's check made it ahead of a user kernel's devmgr; the third and fourth, for a name taken with none kept or no memory, rest on their argued coverage entries, and under checks L.object.344 stops a boot that takes them. And with kernel objects alone, on every profile, the `drv jobs` line (syscall/rehome_check.rs::check_drivers_sealed), which fails a missing slice on a boot whose devmgr bound a driver and makes one on a boot with none.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1141
+                    "line": 1145
                   }
                 },
                 {
@@ -100810,7 +100867,7 @@
                   "value": "\"H.OBJ.22\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1142
+                    "line": 1146
                   }
                 },
                 {
@@ -100821,7 +100878,7 @@
                   "value": "(\"discovery::devmgr::drivers_job\", \"object::job::Job::new_root_as\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1144
+                    "line": 1148
                   }
                 }
               ]
@@ -100834,7 +100891,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1146
+                "line": 1150
               },
               "children": [
                 {
@@ -100845,7 +100902,7 @@
                   "value": "\"device_bind_domain shall need MANAGE and BIND_DOMAIN on the handle, and answer ACCESS_DENIED without BIND_DOMAIN, making no domain.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1149
+                    "line": 1153
                   }
                 },
                 {
@@ -100856,7 +100913,7 @@
                   "value": "\"object::authority_check: a made-up node's handle with the device rights is refused and has no domain after; with the right's test removed the check fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1152
+                    "line": 1156
                   }
                 },
                 {
@@ -100867,7 +100924,7 @@
                   "value": "\"H.DEV.9\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1153
+                    "line": 1157
                   }
                 },
                 {
@@ -100878,7 +100935,7 @@
                   "value": "\"syscall::native::device_bind_domain\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1154
+                    "line": 1158
                   }
                 }
               ]
@@ -100891,7 +100948,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1156
+                "line": 1160
               },
               "children": [
                 {
@@ -100902,7 +100959,7 @@
                   "value": "\"GIVEN_DEVICE_RIGHTS and DEVICE_RIGHTS shall not contain BIND_DOMAIN.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1158
+                    "line": 1162
                   }
                 },
                 {
@@ -100913,7 +100970,7 @@
                   "value": "\"A compile-time assertion in discovery/devmgr.rs; widening either constant fails the build.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1160
+                    "line": 1164
                   }
                 },
                 {
@@ -100924,7 +100981,7 @@
                   "value": "\"H.DEV.9\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1161
+                    "line": 1165
                   }
                 },
                 {
@@ -100935,7 +100992,7 @@
                   "value": "\"discovery::devmgr::write_devices\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1162
+                    "line": 1166
                   }
                 }
               ]
@@ -100948,7 +101005,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1164
+                "line": 1168
               },
               "children": [
                 {
@@ -100959,7 +101016,7 @@
                   "value": "\"On an explicit node nobody bound, io_mapping_create, interrupt_create, vmo_pin and device_set_limit shall answer BAD_STATE, device_isolation shall answer untranslated, and none shall make a domain; a node that reaches no memory has nothing to bind and is exempt from the first two.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1169
+                    "line": 1173
                   }
                 },
                 {
@@ -100970,7 +101027,7 @@
                   "value": "\"object::authority_check, each call on a made-up node, and on an idle real PCI function where one exists; with domain_for_call answering through domain the check fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1172
+                    "line": 1176
                   }
                 },
                 {
@@ -100981,7 +101038,7 @@
                   "value": "\"H.DEV.10\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1173
+                    "line": 1177
                   }
                 },
                 {
@@ -100992,7 +101049,7 @@
                   "value": "(\"device::DeviceNode::may_drive\", \"device::silence_found_masters\", \"device::DeviceNode::take_domain_for_check\", \"device::DeviceNode::domain_for_call\", \"syscall::native::domain_of_call\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1178
+                    "line": 1182
                   }
                 }
               ]
@@ -101005,7 +101062,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1180
+                "line": 1184
               },
               "children": [
                 {
@@ -101016,7 +101073,7 @@
                   "value": "\"A bind on a bound node shall answer ALREADY_BOUND, on a node reaching no memory or a function dma_exempt names WRONG_TYPE, on a refused node BAD_STATE, and on a function whose only possible domain is held LIMIT_REACHED, each leaving the node as it was.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1185
+                    "line": 1189
                   }
                 },
                 {
@@ -101027,7 +101084,7 @@
                   "value": "\"object::authority_check drives the bound, no-memory and refused cases with their controls; dma_exempt and a held domain are not reachable on QEMU's made-up nodes and rest on their argued coverage entries.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1189
+                    "line": 1193
                   }
                 },
                 {
@@ -101038,7 +101095,7 @@
                   "value": "\"H.DEV.10\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1190
+                    "line": 1194
                   }
                 },
                 {
@@ -101049,7 +101106,7 @@
                   "value": "\"device::DeviceNode::bind_domain\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1191
+                    "line": 1195
                   }
                 }
               ]
@@ -101062,7 +101119,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1193
+                "line": 1197
               },
               "children": [
                 {
@@ -101073,7 +101130,7 @@
                   "value": "\"Every IOMMU unit's registers shall be reserved, an aperture minted over them shall be withheld, and no published aperture shall overlap them.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1196
+                    "line": 1200
                   }
                 },
                 {
@@ -101084,7 +101141,7 @@
                   "value": "\"device::check::check_iommu_held on every boot with a unit; with the units left out of Reserved it fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1198
+                    "line": 1202
                   }
                 },
                 {
@@ -101095,7 +101152,7 @@
                   "value": "\"H.DEV.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1199
+                    "line": 1203
                   }
                 },
                 {
@@ -101106,7 +101163,7 @@
                   "value": "(\"device::Reserved::of\", \"device::Reserved::unit_reserved\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1200
+                    "line": 1204
                   }
                 }
               ]
@@ -101119,7 +101176,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1202
+                "line": 1206
               },
               "children": [
                 {
@@ -101130,7 +101187,7 @@
                   "value": "\"A node shall be explicit, and the kept handle carry BIND_DOMAIN, exactly when the kernel is built with personality=user.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1205
+                    "line": 1209
                   }
                 },
                 {
@@ -101141,7 +101198,7 @@
                   "value": "\"A compile-time assertion, and object::authority_check reads every published node; a node forced to the other value fails it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1208
+                    "line": 1212
                   }
                 },
                 {
@@ -101152,7 +101209,7 @@
                   "value": "\"H.DEV.9\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1209
+                    "line": 1213
                   }
                 },
                 {
@@ -101163,7 +101220,7 @@
                   "value": "(\"device::DeviceNode::explicit_bind\", \"device::DeviceNode::explicit_for_check\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1211
+                    "line": 1215
                   }
                 }
               ]
@@ -101176,7 +101233,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1213
+                "line": 1217
               },
               "children": [
                 {
@@ -101187,7 +101244,7 @@
                   "value": "\"A bind whose domain would not translate shall be refused ACCESS_DENIED and the domain not kept, unless the boot carries ferrix.unisolated.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1216
+                    "line": 1220
                   }
                 },
                 {
@@ -101198,7 +101255,7 @@
                   "value": "\"object::authority_check on a made-up node, without and with the word; with the test removed it fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1218
+                    "line": 1222
                   }
                 },
                 {
@@ -101209,7 +101266,7 @@
                   "value": "\"H.DEV.10\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1219
+                    "line": 1223
                   }
                 },
                 {
@@ -101220,7 +101277,7 @@
                   "value": "\"device::DeviceNode::bind_domain\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1220
+                    "line": 1224
                   }
                 }
               ]
@@ -101233,7 +101290,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1222
+                "line": 1226
               },
               "children": [
                 {
@@ -101244,7 +101301,7 @@
                   "value": "\"No published aperture shall lie over the memory map, where the IOMMU's tables are, the boot framebuffer's node aside.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1225
+                    "line": 1229
                   }
                 },
                 {
@@ -101255,7 +101312,7 @@
                   "value": "\"device::check::check_iommu_held's sweep on every boot; with the memory map left out of Reserved it fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1227
+                    "line": 1231
                   }
                 },
                 {
@@ -101266,7 +101323,7 @@
                   "value": "\"H.DEV.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1228
+                    "line": 1232
                   }
                 },
                 {
@@ -101277,7 +101334,7 @@
                   "value": "\"device::Reserved::covers\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1229
+                    "line": 1233
                   }
                 }
               ]
@@ -101291,7 +101348,7 @@
           "doc": "Generic device-tree nodes (docs/DRIVER-MODEL.md section 3, step 1; the consultant's D3-D10 and D21, ledger 4475): the kernel-owned set, sealed; the identity record; the minting rules a generic node is held to.",
           "source": {
             "file": "docs/sysml/20-device-requirements.sysml",
-            "line": 1233
+            "line": 1237
           },
           "children": [
             {
@@ -101302,7 +101359,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1239
+                "line": 1243
               },
               "children": [
                 {
@@ -101313,7 +101370,7 @@
                   "value": "\"claim_kernel_use and use_window shall be the one way into the kernel-owned set, and every claim shall be refused once stage 10 has sealed the set, which it does when every finder has run and before anything is published; after the seal, use_window -- the one way board support maps a register window -- shall allow only a window wholly inside a range claimed before the seal. Under personality=user only: a hybrid registers no claim and seals nothing.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1247
+                    "line": 1251
                   }
                 },
                 {
@@ -101324,7 +101381,7 @@
                   "value": "\"Stage 10's check: a claim after the seal is refused Sealed, a window outside every claim NotClaimed; with either refusal removed the boot panics naming a kernel claim after the seal, or a window outside every claim mapped after it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1251
+                    "line": 1255
                   }
                 },
                 {
@@ -101335,7 +101392,7 @@
                   "value": "\"H.DEV.8\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1252
+                    "line": 1256
                   }
                 },
                 {
@@ -101346,7 +101403,7 @@
                   "value": "(\"discovery::tree::claim_kernel_use\", \"discovery::tree::seal\", \"discovery::tree::sealed\", \"discovery::tree::claims\", \"discovery::tree::use_window\", \"discovery::tree::covered\", \"discovery::tree::covered_by\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1256
+                    "line": 1260
                   }
                 }
               ]
@@ -101359,7 +101416,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1258
+                "line": 1262
               },
               "children": [
                 {
@@ -101370,7 +101427,7 @@
                   "value": "\"A generic node's identity record shall carry each clocks, resets, power-domains, pinctrl-N, *-supply, interconnects, interrupts-extended, gpios, dmas, mboxes and iommus reference as the provider node, the node the phandle names, the phandle and the specifier cells the provider's #cells says, copied and not interpreted; a phandle that names no node, or a disabled one, shall be a reference marked missing or disabled, and the record its compatible list, path, *-names and subtree. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1268
+                    "line": 1272
                   }
                 },
                 {
@@ -101381,7 +101438,7 @@
                   "value": "\"ferrix-fdt's host tests: references of every kind, a missing and a disabled provider, a pin configuration's controller, the record read back; test-driver-model reads the PL031's path and its apb_pclk reference out of the record devmgr is given.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1273
+                    "line": 1277
                   }
                 },
                 {
@@ -101392,7 +101449,7 @@
                   "value": "\"H.DEV.7\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1274
+                    "line": 1278
                   }
                 },
                 {
@@ -101403,7 +101460,7 @@
                   "value": "\"discovery::tree::Walk::node\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1275
+                    "line": 1279
                   }
                 }
               ]
@@ -101416,7 +101473,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1277
+                "line": 1281
               },
               "children": [
                 {
@@ -101427,7 +101484,7 @@
                   "value": "\"Every device window early boot mapped -- the console the kernel brought up, whichever the command line or the tree named -- shall be claimed before the seal on every machine; claim_tree_uses shall register as used the nodes the kernel's own accessors find (the console stdout-path names, the primary interrupt controller, the architected timer, PSCI, the SMMUv3s, /cpus, /memory, /reserved-memory, /chosen), each spin-table release address, every reserved range not the memory map's and every device window mapped; Ownership::derive shall make kernel-owned every used node, every node under one, and every node whose page-rounded registers overlap a used range or a used node's registers; and no node sharing a page with any kernel-owned node's registers, however that node came to be kernel-owned, shall be published. Under personality=user only: a hybrid registers no claim and seals nothing.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1292
+                    "line": 1296
                   }
                 },
                 {
@@ -101438,7 +101495,7 @@
                   "value": "\"Stage 10's check: on a made-up tree the console is not published, a node in its page is kernel-owned and a node in that node's other page is not published; every early window is claimed and no published generic node holds one of its pages. With a used node's registers left out, with only used nodes' pages tested, or with the early windows unclaimed, the boot panics naming the rule.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1299
+                    "line": 1303
                   }
                 },
                 {
@@ -101449,7 +101506,7 @@
                   "value": "\"H.DEV.8\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1300
+                    "line": 1304
                   }
                 },
                 {
@@ -101460,7 +101517,7 @@
                   "value": "(\"discovery::tree::claim_tree_uses\", \"discovery::tree::claim_accessor_nodes\", \"discovery::tree::claim_described_nodes\", \"discovery::tree::claim_node\", \"discovery::tree::Ownership::derive\", \"discovery::tree::split\", \"discovery::tree::pages_of\", \"discovery::tree::Ownership::owns\", \"discovery::tree::Ownership::owned\", \"discovery::tree::Ownership::owns_pages\", \"discovery::tree::claim_early_windows\", \"discovery::tree::Walk::publishes\", \"discovery::tree::say_stopped\", \"discovery::tree::PathOf::fmt\", \"early::device_windows\", \"early::record_window\", \"device::begin\", \"device::Reserved::kernel_ranges\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1311
+                    "line": 1315
                   }
                 }
               ]
@@ -101473,7 +101530,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1313
+                "line": 1317
               },
               "children": [
                 {
@@ -101484,7 +101541,7 @@
                   "value": "\"Every node a kernel-owned node references as a clock, reset, power domain, pin configuration (and its controller), supply or interconnect, directly or through nodes so referenced, shall be published with FLAG_KERNEL_DEPENDS in its record and in device_info's device_id; and when a kernel-owned or depended-on node's references cannot all be read -- past the record's bound, a provider that does not say how wide its specifiers are, or a phandle that names no node with words after it -- nothing of the tree shall be published, with a line naming the node. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1325
+                    "line": 1329
                   }
                 },
                 {
@@ -101495,7 +101552,7 @@
                   "value": "\"Stage 10's check: a made-up console's clock and that clock's clock are flagged, a node it does not reference is not, and a made-up console whose clock's provider has no #clock-cells, or whose clocks name no node before a provider, stops publication; with the walk stopped after one reference, or the stop removed, the boot panics naming the rule. devmgr's refusal of a flagged node inside the claim is ring 3, outside this requirement, and unchecked (DRIVER-MODEL.md §12, BACKLOG).\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1334
+                    "line": 1338
                   }
                 },
                 {
@@ -101506,7 +101563,7 @@
                   "value": "\"H.DEV.8\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1335
+                    "line": 1339
                   }
                 },
                 {
@@ -101517,7 +101574,7 @@
                   "value": "(\"discovery::tree::Ownership::close\", \"discovery::tree::Ownership::depend\", \"discovery::tree::Ownership::depends_on\", \"discovery::tree::Ownership::incomplete\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1339
+                    "line": 1343
                   }
                 }
               ]
@@ -101530,7 +101587,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1341
+                "line": 1345
               },
               "children": [
                 {
@@ -101541,7 +101598,7 @@
                   "value": "\"Generic publication's parsing shall be bounded: no node deeper than 16 levels visited, at most 64 references a node read and at most 8 cells each, at most 512 bytes of compatible and 256 of path copied, a record of at most 4096 bytes with what does not fit cut and flagged, a ranges translation of at most 16 hops over addresses of at most two cells, and at most 256 generic nodes a tree; the walk holds no lock. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1351
+                    "line": 1355
                   }
                 },
                 {
@@ -101552,7 +101609,7 @@
                   "value": "\"ferrix-fdt's host tests of each bound, and the fdt_generic fuzz target: every node visited once with its depth of ancestors, references within their bound, every record read back within its buffer.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1355
+                    "line": 1359
                   }
                 },
                 {
@@ -101563,7 +101620,7 @@
                   "value": "\"H.DEV.7\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1356
+                    "line": 1360
                   }
                 },
                 {
@@ -101574,7 +101631,7 @@
                   "value": "(\"discovery::tree::find_generic\", \"discovery::tree::stop_on\", \"discovery::tree::primary_controller\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1358
+                    "line": 1362
                   }
                 }
               ]
@@ -101587,7 +101644,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1360
+                "line": 1364
               },
               "children": [
                 {
@@ -101598,7 +101655,7 @@
                   "value": "\"A generic node's register range shall be minted as an aperture of the whole pages it lies in, and withheld whole when those pages overlap reserved memory or the range is empty, starts in the page at physical address 0, runs off the address space or does not translate. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1367
+                    "line": 1371
                   }
                 },
                 {
@@ -101609,7 +101666,7 @@
                   "value": "\"Stage 10's check: a made-up range in a page the kernel reserves another part of is withheld, a whole page minted; with the overlap tested on the exact range the boot panics naming a range sharing a page with reserved memory.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1371
+                    "line": 1375
                   }
                 },
                 {
@@ -101620,7 +101677,7 @@
                   "value": "\"H.DEV.7\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1372
+                    "line": 1376
                   }
                 },
                 {
@@ -101631,7 +101688,7 @@
                   "value": "(\"device::DeviceNode::mint_generic\", \"device::page_span\", \"device::DeviceNode::generic\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1374
+                    "line": 1378
                   }
                 }
               ]
@@ -101644,7 +101701,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1376
+                "line": 1380
               },
               "children": [
                 {
@@ -101655,7 +101712,7 @@
                   "value": "\"A page an aperture of a generic node shares with an aperture of any other node shall be minted to neither, and the generic node's record flagged REGISTERS_WITHHELD. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1381
+                    "line": 1385
                   }
                 },
                 {
@@ -101666,7 +101723,7 @@
                   "value": "\"Stage 10's check: two made-up nodes in one page keep no aperture, and no published generic node shares a page; with the rule off the boot panics naming a page two published nodes share.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1385
+                    "line": 1389
                   }
                 },
                 {
@@ -101677,7 +101734,7 @@
                   "value": "\"H.DEV.7\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1386
+                    "line": 1390
                   }
                 },
                 {
@@ -101688,7 +101745,7 @@
                   "value": "(\"device::withhold_shared_pages\", \"device::DeviceNode::flag_identity\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1388
+                    "line": 1392
                   }
                 }
               ]
@@ -101701,7 +101758,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1390
+                "line": 1394
               },
               "children": [
                 {
@@ -101712,7 +101769,7 @@
                   "value": "\"A generic node shall be given its interrupts only on the primary interrupt controller, in order, each only if it is a shared peripheral interrupt no kernel handler and no other node holds, the first refused ending the list. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1396
+                    "line": 1400
                   }
                 },
                 {
@@ -101723,7 +101780,7 @@
                   "value": "\"Stage 10's check: a made-up private line is refused and a shared one minted; with claim_line taking private lines the boot panics naming a private interrupt minted to a generic node.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1400
+                    "line": 1404
                   }
                 },
                 {
@@ -101734,7 +101791,7 @@
                   "value": "\"H.DEV.7\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1401
+                    "line": 1405
                   }
                 },
                 {
@@ -101745,7 +101802,7 @@
                   "value": "\"discovery::tree::Walk::node\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1402
+                    "line": 1406
                   }
                 }
               ]
@@ -101758,7 +101815,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1404
+                "line": 1408
               },
               "children": [
                 {
@@ -101769,7 +101826,7 @@
                   "value": "\"Every generic node shall be described as reaching memory, whatever its tree says: NO_DMA comes only from nodes the kernel describes itself. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1409
+                    "line": 1413
                   }
                 },
                 {
@@ -101780,7 +101837,7 @@
                   "value": "\"Stage 10's check: every made-up and every published generic node reaches memory; with generic nodes described as reaching none the boot panics naming a generic node described as reaching no memory.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1413
+                    "line": 1417
                   }
                 },
                 {
@@ -101791,7 +101848,7 @@
                   "value": "(\"H.DEV.7\", \"H.DMA.9\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1414
+                    "line": 1418
                   }
                 },
                 {
@@ -101802,7 +101859,7 @@
                   "value": "(\"device::DeviceNode::reaches_memory\", \"device::DeviceNode::is_generic\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1416
+                    "line": 1420
                   }
                 }
               ]
@@ -101815,7 +101872,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1418
+                "line": 1422
               },
               "children": [
                 {
@@ -101826,7 +101883,7 @@
                   "value": "\"device_info shall describe a generic node with virtio DEVICE_TREE_GENERIC, its record's flags in device_id and the record's length in class; and device_config_read shall read the record, read-only, zero past its end, where device_config_write is refused. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1425
+                    "line": 1429
                   }
                 },
                 {
@@ -101837,7 +101894,7 @@
                   "value": "\"Stage 10's check: every published generic node's device_info and its record's first word read back; devmgr matches the PL031 of test-driver-model through them.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1428
+                    "line": 1432
                   }
                 },
                 {
@@ -101848,7 +101905,7 @@
                   "value": "\"H.DEV.7\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1429
+                    "line": 1433
                   }
                 },
                 {
@@ -101859,7 +101916,7 @@
                   "value": "(\"device::DeviceNode::describe\", \"device::DeviceNode::config_read\", \"device::DeviceNode::set_identity\", \"device::DeviceNode::identity\", \"device::DeviceNode::identity_flags\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1432
+                    "line": 1436
                   }
                 }
               ]
@@ -101872,7 +101929,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1434
+                "line": 1438
               },
               "children": [
                 {
@@ -101883,7 +101940,7 @@
                   "value": "\"Generic publication shall leave alone every node whose registers an earlier finder's node holds -- a binding the kernel knows, or a virtio-mmio transport -- and every virtio,mmio node, so that no tree node is published twice. Only personality=user publishes real nodes: present and desktop publish none, and every profile's check holds this on made-up trees.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1440
+                    "line": 1444
                   }
                 },
                 {
@@ -101894,7 +101951,7 @@
                   "value": "\"Stage 10's check: a made-up node a binding holds is not published again, and no tree node's record is published twice; with the hold not tested the boot panics naming a node a binding holds published again.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1444
+                    "line": 1448
                   }
                 },
                 {
@@ -101905,7 +101962,7 @@
                   "value": "\"H.DEV.7\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1445
+                    "line": 1449
                   }
                 },
                 {
@@ -101916,7 +101973,7 @@
                   "value": "\"discovery::board::Boards::find\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1446
+                    "line": 1450
                   }
                 }
               ]
@@ -101929,7 +101986,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1448
+                "line": 1452
               },
               "children": [
                 {
@@ -101940,7 +101997,7 @@
                   "value": "\"device_served, under personality=user alone and needing MANAGE, shall read the device's configuration back and release a dead driver's pins from quarantine, refusing BAD_STATE when the read-back refuses.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1451
+                    "line": 1455
                   }
                 },
                 {
@@ -101951,7 +102008,7 @@
                   "value": "\"test-btrfsd-restart: the release comes after the next driver's acceptance, and not at its death.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1453
+                    "line": 1457
                   }
                 },
                 {
@@ -101962,7 +102019,7 @@
                   "value": "\"H.DEV.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1454
+                    "line": 1458
                   }
                 },
                 {
@@ -101973,7 +102030,7 @@
                   "value": "(\"syscall::native::device_served\", \"device::DeviceNode::served\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1455
+                    "line": 1459
                   }
                 }
               ]
@@ -101986,7 +102043,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1457
+                "line": 1461
               },
               "children": [
                 {
@@ -101997,7 +102054,7 @@
                   "value": "\"vmo_hold, under personality=user alone, shall refuse a handle without READ and MAP, a VMO past its bound, a pager's, a sealed or a write- combining one, and commit on the charge of the job the VMO is charged to.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1461
+                    "line": 1465
                   }
                 },
                 {
@@ -102008,7 +102065,7 @@
                   "value": "\"test-btrfsd-restart: the driver's probes by the real call, and the server's own figure not growing with a driver's sparse megabytes.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1463
+                    "line": 1467
                   }
                 },
                 {
@@ -102019,7 +102076,7 @@
                   "value": "\"H.DEV.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1464
+                    "line": 1468
                   }
                 },
                 {
@@ -102030,7 +102087,7 @@
                   "value": "(\"syscall::native::vmo_hold\", \"user::vmo::Vmo::hold_whole_on_payer\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1465
+                    "line": 1469
                   }
                 }
               ]
@@ -102043,7 +102100,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1467
+                "line": 1471
               },
               "children": [
                 {
@@ -102054,7 +102111,7 @@
                   "value": "\"Pages held shall stay backed across the death of the driver that made them, until the hold is closed.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1469
+                    "line": 1473
                   }
                 },
                 {
@@ -102065,7 +102122,7 @@
                   "value": "\"test-btrfsd-restart: requests over three restarts read the right bytes, and what the drivers' job holds does not grow.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1471
+                    "line": 1475
                   }
                 },
                 {
@@ -102076,7 +102133,7 @@
                   "value": "\"H.DEV.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1472
+                    "line": 1476
                   }
                 },
                 {
@@ -102087,7 +102144,7 @@
                   "value": "\"user::vmo::Vmo::hold_whole_on_payer\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1473
+                    "line": 1477
                   }
                 }
               ]
@@ -102100,7 +102157,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1475
+                "line": 1479
               },
               "children": [
                 {
@@ -102111,7 +102168,7 @@
                   "value": "\"DEBUG_WRITE shall need a handle of the debug log with WRITE, shall take at most one line's bound a call, and a measured process's line shall carry a prefix from the kernel's own record of the writer.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1478
+                    "line": 1482
                   }
                 },
                 {
@@ -102122,7 +102179,7 @@
                   "value": "\"test-first-processes reads each first process's line with its prefix; a call with no such handle is refused by native_check; a QM process's line reads as anything, stated.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1480
+                    "line": 1484
                   }
                 },
                 {
@@ -102133,7 +102190,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1481
+                    "line": 1485
                   }
                 },
                 {
@@ -102144,7 +102201,7 @@
                   "value": "\"syscall::native::lift::call\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1482
+                    "line": 1486
                   }
                 }
               ]
@@ -102157,7 +102214,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1484
+                "line": 1488
               },
               "children": [
                 {
@@ -102168,7 +102225,7 @@
                   "value": "\"A process shall write at most its budget of bytes a second to the debug log, past which DEBUG_WRITE answers SHOULD_WAIT, so that a QM process cannot starve a safety partition's lines.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1486
+                    "line": 1490
                   }
                 },
                 {
@@ -102179,7 +102236,7 @@
                   "value": "\"test-first-processes; the console lock's hold bound is in MEMORY-AND-TIMING.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1487
+                    "line": 1491
                   }
                 },
                 {
@@ -102190,7 +102247,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1488
+                    "line": 1492
                   }
                 },
                 {
@@ -102201,7 +102258,7 @@
                   "value": "\"object::process::Process::debug_budget_takes\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1489
+                    "line": 1493
                   }
                 }
               ]
@@ -102214,7 +102271,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1491
+                "line": 1495
               },
               "children": [
                 {
@@ -102225,7 +102282,7 @@
                   "value": "\"A node flagged needs_certified shall give its vector, I/O mapping and pin only to a process that passes K14's test.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1493
+                    "line": 1497
                   }
                 },
                 {
@@ -102236,7 +102293,7 @@
                   "value": "\"object::grant_check on a made-up node.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1494
+                    "line": 1498
                   }
                 },
                 {
@@ -102247,7 +102304,7 @@
                   "value": "\"H.DEV.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1495
+                    "line": 1499
                   }
                 },
                 {
@@ -102258,7 +102315,7 @@
                   "value": "(\"syscall::native::certified_grant\", \"syscall::native::takes_grant\", \"iommu::would_translate\", \"device::DeviceNode::wants_certified\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1496
+                    "line": 1500
                   }
                 }
               ]
@@ -102271,7 +102328,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1498
+                "line": 1502
               },
               "children": [
                 {
@@ -102282,7 +102339,7 @@
                   "value": "\"What a needs_certified node's vector, I/O mapping and pin give shall carry no TRANSFER.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1500
+                    "line": 1504
                   }
                 },
                 {
@@ -102293,7 +102350,7 @@
                   "value": "\"object::grant_check.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1501
+                    "line": 1505
                   }
                 },
                 {
@@ -102304,7 +102361,7 @@
                   "value": "\"H.DEV.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1502
+                    "line": 1506
                   }
                 },
                 {
@@ -102315,7 +102372,7 @@
                   "value": "\"device::DeviceNode::derived_rights\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1503
+                    "line": 1507
                   }
                 }
               ]
@@ -102328,7 +102385,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1506
+                "line": 1510
               },
               "children": [
                 {
@@ -102339,7 +102396,7 @@
                   "value": "\"A block ring's write shall copy each request's bytes, at most what the device takes at once and never above 128 KiB, into the heap fallibly; when the heap refuses, into one of two payloads the disk keeps for its life, lent until the request leaves its requests map; and when both are lent, wait for one at most a bounded time, then answer ENOMEM.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1511
+                    "line": 1515
                   }
                 },
                 {
@@ -102350,7 +102407,7 @@
                   "value": "\"block_ring::offline_check::reserve, on a disk no ring serves with the heap's refusals injected on the writing task: a refused copy is served from the reserve with the caller's bytes and queued; with both lent, a third answers ENOMEM once its wait is over and within half a second of it; a collected write and an abandoned one answered later each give their payload back, lent and free always two. The ring's code is load code, which cannot be a unit (check-traceability refuses it); the unit is the item's half, the deadline wait it sleeps in.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1519
+                    "line": 1523
                   }
                 },
                 {
@@ -102361,7 +102418,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1520
+                    "line": 1524
                   }
                 },
                 {
@@ -102372,7 +102429,7 @@
                   "value": "\"sched::wait::WaitQueue::wait_until_deadline\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1521
+                    "line": 1525
                   }
                 }
               ]
@@ -102385,7 +102442,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1523
+                "line": 1527
               },
               "children": [
                 {
@@ -102396,7 +102453,7 @@
                   "value": "\"A block ring request whose entry in the requests map cannot be made shall be refused with ENOMEM before it is queued, leaving nothing the ring could dispatch and giving back a reserved payload it held.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1526
+                    "line": 1530
                   }
                 },
                 {
@@ -102407,7 +102464,7 @@
                   "value": "\"block_ring::offline_check::reserve: with the entry's allocation refused, the submit answers ENOMEM, the queue and the map hold what they held before, and the reserve is all free. The unit is the item's fallible insert the entry is made with; the ring's code is load code.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1530
+                    "line": 1534
                   }
                 },
                 {
@@ -102418,7 +102475,7 @@
                   "value": "\"H.STORE.7\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1531
+                    "line": 1535
                   }
                 },
                 {
@@ -102429,7 +102486,7 @@
                   "value": "\"fallible::insert\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1532
+                    "line": 1536
                   }
                 }
               ]
@@ -102442,7 +102499,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 1534
+                "line": 1538
               },
               "children": [
                 {
@@ -102453,7 +102510,7 @@
                   "value": "\"The kernel shall give devmgr every device it gives it in as many DEVICES messages as the channel's handle limit needs, and no DEVICES message shall carry more handles than a channel takes.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1537
+                    "line": 1541
                   }
                 },
                 {
@@ -102464,7 +102521,7 @@
                   "value": "\"test-driver-model on a personality=user kernel: a device-tree boot of QEMU virt hands devmgr 44 devices, devmgr starts and the test's device is served. With the first message's room counted as before (two of its channels left out) the boot reads that DEVICES could not be written to devmgr's channel, and devmgr does not start.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1542
+                    "line": 1546
                   }
                 },
                 {
@@ -102475,7 +102532,7 @@
                   "value": "\"H.DEV.12\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1543
+                    "line": 1547
                   }
                 },
                 {
@@ -102486,7 +102543,7 @@
                   "value": "\"discovery::devmgr::write_devices\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 1544
+                    "line": 1548
                   }
                 }
               ]

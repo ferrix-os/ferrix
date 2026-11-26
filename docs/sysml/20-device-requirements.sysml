@@ -1130,15 +1130,19 @@ package FerrixDeviceRequirements {
                 "arch::x86_64::powerctl::unserved");
         }
         requirement <'L.device.54'> driversSliceIsSealed : ItemLowLevel {
-            attribute :>> statement = "drivers_job shall make drivers.slice sealed
-                on each of its three paths, so that devmgr and every driver's job
-                beneath it are sealed.";
+            attribute :>> statement = "drivers_job shall answer a sealed job on
+                each of its four paths, the slice kept, a new named child, an
+                anonymous child and a root of its own, so that devmgr and every
+                driver's job beneath it are sealed.";
             attribute :>> criterion = "The sysfs check, once devmgr has reported
                 (or, under ferrix.devmgr=init, before init has started it):
                 drivers.slice and every job beneath it read as sealed. A boot
-                exercises drivers_job's first path, the named child, only; the
-                second and third, for a name taken or no memory, rest on their
-                argued coverage entries. And with kernel objects alone, on every profile, the `drv jobs` line (syscall/rehome_check.rs::check_drivers_sealed), which fails a missing slice on a boot whose devmgr bound a driver and makes one on a boot with none.";
+                exercises the first two paths: a new named child where devmgr
+                is started first (the kernel's path), and the slice kept where
+                stage 10's check made it ahead of a user kernel's devmgr; the
+                third and fourth, for a name taken with none kept or no memory,
+                rest on their argued coverage entries, and under checks
+                L.object.344 stops a boot that takes them. And with kernel objects alone, on every profile, the `drv jobs` line (syscall/rehome_check.rs::check_drivers_sealed), which fails a missing slice on a boot whose devmgr bound a driver and makes one on a boot with none.";
             attribute :>> parent = "H.OBJ.22";
             attribute :>> unit = ("discovery::devmgr::drivers_job",
                 "object::job::Job::new_root_as");

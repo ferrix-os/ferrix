@@ -2877,7 +2877,7 @@ checks above is `pub` for raised checks (F3).
 | `STAGE10_CHARDEV` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE10_CONFIG` | static | bin |  |
 | `STAGE10_DEVICES` | static | bin |  |
-| `STAGE10_DEVMGR` | static | bin |  |
+| `STAGE10_DEVMGR` | static | item, bin |  |
 | `STAGE10_DISPLAY_COPIES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE10_DISPLAY_MODES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE10_DISTRIBUTOR` | static | bin |  |

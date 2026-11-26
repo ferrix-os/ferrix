@@ -4173,6 +4173,14 @@ package FerrixObjectRequirements {
                 case: a copy as a task of a job at its memory limit, into the first page refused, reads NoMemory.";
             attribute :>> parent = "H.QUOTA.2";
             attribute :>> unit = "syscall::uaccess::UserError::from";
+        requirement <'L.object.344'> theDriversRunInTheirSlice : ItemLowLevel {
+            attribute :>> statement = "devmgr shall be started in drivers.slice, the one job a boot makes of that name,
+                on the kernel's path and on a user kernel's.";
+            attribute :>> criterion = "syscall::rehome_check::check_one_slice, asked by devmgr_job on every checked boot
+                that starts devmgr: the job is drivers.slice; its control, the kept slice not answered, FIRED on a user
+                kernel on x86_64 KVM and AArch64 TCG (n27b-s-ctl-x86, n27b-s-ctl-a64).";
+            attribute :>> parent = "H.OBJ.22";
+            attribute :>> unit = ("discovery::devmgr::drivers_job", "discovery::devmgr::devmgr_job");
         }
         requirement <'L.object.346'> aFurtherPartitionHoldsItsRow : ItemLowLevel {
             attribute :>> statement = "A further Linux partition shall be started in a job and a region of its own with the
