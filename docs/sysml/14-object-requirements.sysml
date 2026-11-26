@@ -1217,10 +1217,14 @@ package FerrixObjectRequirements {
                 the tree, in which every process starts unless it is forked from a
                 process elsewhere or moved.";
             attribute :>> criterion = "A new process is in the root job, and a
-                fork's child in its parent's job.";
+                fork's child in its parent's job. The root job is made by bring-up's
+                explicit call (make_root, from bring-up's report_clocks_make_root_job_and_power, and linuxd's at its
+                start); root() reads it and never allocates, and a call before it stops
+                the boot as FX-0014; control n27e-root-c1 (x86-64 KVM) and n27e-root-c2
+                (AArch64 TCG), the call removed (K16.5, ledger 10613 M4).";
             attribute :>> parent = "H.OBJ.12";
-            attribute :>> unit = ("object::job::root", "object::job::Job::new_tree_root",
-                "object::job::Job::bare");
+            attribute :>> unit = ("object::job::root", "object::job::make_root",
+                "object::job::Job::new_tree_root", "object::job::Job::bare");
         }
         requirement <'L.object.64'> aChildsQuotaIsInsideItsParents : ItemLowLevel {
             doc /* The job's audit budget (docs/certification/AUDIT.md §3) is

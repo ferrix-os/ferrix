@@ -17,12 +17,12 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | High (`H.*`) | 198 | 143 | 55 |
 | Low (`L.*`) | 1578 | 1298 | 280 |
 
-3594 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3595 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3603 |
-| Accessors, covered by the requirement they serve | 1588 |
+| Named by a low-level requirement | 3604 |
+| Accessors, covered by the requirement they serve | 1589 |
 | Check code in a product file | 133 |
 | Named by none | 1223 |
 
@@ -653,7 +653,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|---|
-| `L.object.63` | root shall answer the one job at the top of the tree, in which every process starts unless it is forked from a process elsewhere or moved. | A new process is in the root job, and a fork's child in its parent's job. | H.OBJ.12 | `object::job::root`, `object::job::Job::new_tree_root`, `object::job::Job::bare` | `src/kernel/src/object/check.rs::check_a_job_counts_its_members` | reached | reached | reached |
+| `L.object.63` | root shall answer the one job at the top of the tree, in which every process starts unless it is forked from a process elsewhere or moved. | A new process is in the root job, and a fork's child in its parent's job. The root job is made by bring-up's explicit call (make_root, from bring-up's report_clocks_make_root_job_and_power, and linuxd's at its start); root() reads it and never allocates, and a call before it stops the boot as FX-0014; control n27e-root-c1 (x86-64 KVM) and n27e-root-c2 (AArch64 TCG), the call removed (K16.5, ledger 10613 M4). | H.OBJ.12 | `object::job::root`, `object::job::make_root`, `object::job::Job::new_tree_root`, `object::job::Job::bare` | `src/kernel/src/object/check.rs::check_a_job_counts_its_members` | reached | reached | reached |
 | `L.object.64` | A child job shall be made inside its parent, with a quota slot inside the parent's. | A charge to a grandchild is counted in its parent and in the root of the check's tree too, and a limit on the parent refuses it. | H.OBJ.12, H.QUOTA.5 | `object::job::Job::new_child`, `object::job::Job::bare_child`, `object::job::Job::new_root`, `object::quota::Quota::identify` | `src/kernel/src/object/quota_check.rs::check_the_counters` | reached | reached | reached |
 | `L.object.65` | A child job shall be charged as one object to the running task's job, and refused once its parent has been killed. | In a job limited to 5 objects and holding 5, job_create is refused and nothing is charged; job_create in a killed job is refused. | H.QUOTA.9, H.OBJ.9 | `object::job::Job::new_child`, `object::job::Job::bare_child` | *baselined* | — | — | — |
 | `L.object.66` | Job::new_named_child shall refuse a name a named child of the job already has. | A second child named a.slice beside the first is refused. | H.OBJ.12 | `object::job::Job::new_named_child` | `src/kernel/src/object/check.rs::check_the_two_kills` | reached | reached | reached |

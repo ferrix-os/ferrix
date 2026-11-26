@@ -4078,6 +4078,23 @@ pub static STAGE8_PROGRAM_FILES: Explanation = Explanation {
           docs/CHROME.md",
 };
 
+/// The root job asked for before bring-up made it (K16.5, ledger 10613).
+pub(crate) static ROOT_JOB_UNMADE: Explanation = Explanation {
+    code: "FX-0014",
+    title: "the root job was asked for before bring-up made it",
+    meaning: "Bring-up makes the root job of every process's tree once, by an explicit call, \
+              before the scheduler starts (`object::job::make_root`), and `job::root` only \
+              reads it: so the allocation that makes it is a boot one, which \
+              `check-fatal-alloc` can show from the image. Something asked for the root job \
+              before that call: a change to bring-up's order, or a new early user of jobs.",
+    causes: &[
+        "A step of bring-up, or a program's start, moved ahead of the scheduler's start.",
+        "A build that compiles object/job.rs (linuxd's lift among them) does not call \
+         make_root before its first root().",
+    ],
+    see: "src/kernel/src/object/job.rs; docs/microkernel/K16.md (K16.5)",
+};
+
 /// For `finish` in `power.rs`, when init exits under `ferrix.onexit=panic`.
 pub static INIT_EXITED: Explanation = Explanation {
     code: "FX-1501",
@@ -4489,6 +4506,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &SPACE_IDS_EXHAUSTED,
     &HEAP_DRAIN_UNDER_CACHE_LOCK,
     &HEAP_LINKS_DISAGREE,
+    &ROOT_JOB_UNMADE,
     &STAGE1_HANDOFF,
     &MEMORY_BRING_UP,
     &VMAP_ARENA_BRING_UP,

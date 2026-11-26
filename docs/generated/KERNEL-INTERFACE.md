@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3138 declarations in the core's files, 218 in the item's; 280 checks-only.
+3139 declarations in the core's files, 218 in the item's; 280 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1354,7 +1354,7 @@ checks above is `pub` for raised checks (F3).
 | `Read::lost` | field | item, load, bin |  |
 | `Read::next` | field | item, load |  |
 | `Subject::KERNEL` | associated const | item, load, bin |  |
-| `Subject::job` | field | item, load |  |
+| `Subject::job` | field | item, load, bin |  |
 | `Subject::pid` | field | item, load |  |
 | `Subject::uid` | field | load |  |
 | `Subject::of` | method | item, load, bin |  |
@@ -2239,7 +2239,7 @@ checks above is `pub` for raised checks (F3).
 | `exception` | mod | item, load |  |
 | `interrupt` | mod | item, load, bin |  |
 | `io_mapping` | mod | item, load |  |
-| `job` | mod | item, load |  |
+| `job` | mod | item, load, bin |  |
 | `level` | mod | item |  |
 | `oom` | mod | item, load |  |
 | `pager` | mod | item, load |  |
@@ -2316,7 +2316,7 @@ checks above is `pub` for raised checks (F3).
 | `Endpoint::write` | method | item, load |  |
 | `Endpoint::write_small` | method | item, load |  |
 | `Sender::KERNEL` | associated const | item, load, bin |  |
-| `Sender::job` | method | item, load |  |
+| `Sender::job` | method | item, load, bin |  |
 | `Sender::of` | method | item, load, bin |  |
 | `Sender::process` | method | item, load |  |
 | `Small::bytes` | field | item, load, bin |  |
@@ -2393,6 +2393,7 @@ checks above is `pub` for raised checks (F3).
 | `Budget` | enum | item, load |  |
 | `JobError` | enum | item, load |  |
 | `level_declared` | fn | load (checks) | checks-only |
+| `make_root` | fn | bin |  |
 | `root` | fn | item, load |  |
 | `Job` | struct | item, load |  |
 | `NodeAttributes` | struct | load |  |
@@ -2669,7 +2670,7 @@ checks above is `pub` for raised checks (F3).
 | `Process::is_frozen` | method | item, load |  |
 | `Process::is_terminated` | method | item, load |  |
 | `Process::issuer_and_slot` | method | item |  |
-| `Process::job` | method | item, load |  |
+| `Process::job` | method | item, load, bin |  |
 | `Process::job_id` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Process::leave_job` | method | load |  |
 | `Process::leave_speculation_domain` | method | load |  |
@@ -2752,7 +2753,7 @@ checks above is `pub` for raised checks (F3).
 | `Ended` | struct | load |  |
 | `Region` | struct | item |  |
 | `Region::enter` | method | item, load |  |
-| `Region::job` | method | item, load |  |
+| `Region::job` | method | item, load, bin |  |
 | `Region::leave` | method | item, load |  |
 | `Region::new` | method | item, load, bin |  |
 | `Region::set_window` | method | item |  |

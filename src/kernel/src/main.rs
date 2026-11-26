@@ -299,7 +299,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
         ),
     };
     console::screen::milestone(6);
-    report_clocks_and_power(view, &clocks);
+    report_clocks_make_root_job_and_power(view, &clocks);
 
     if let Err(problem) = timer::init() {
         fatal!(
@@ -1790,8 +1790,11 @@ fn register_load(_view: &BootView<'_>) {
     println!("  hooks    the load is in user space: nothing registered above the item");
 }
 
-fn report_clocks_and_power(view: &BootView<'_>, clocks: &irq::Report) {
+fn report_clocks_make_root_job_and_power(view: &BootView<'_>, clocks: &irq::Report) {
     report_clocks(clocks);
+    // The root job, made here, long before the scheduler's first task, so that job::root()
+    // only reads it (K16.5, ledger 10613).
+    object::job::make_root();
     // What the item reaches above it through, registered by what is above it,
     // here in bring-up order: before device enumeration asks board support for
     // its peripherals, before `devmgr` reads its drivers, before anything is

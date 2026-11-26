@@ -84,6 +84,9 @@ extern "C" fn ferrix_rt_start(boot: usize) -> ! {
         console::write_bytes(why.as_bytes());
         ferrix_rt::exit(4);
     }
+    // The root job of linuxd's own tree, before anything asks for it: job::root() only
+    // reads (K16.5, ledger 10613 M2).
+    ferrix_kernel_core::object::job::make_root();
     let Ok(top) = sched::first_stack(served) else {
         ferrix_rt::exit(5);
     };

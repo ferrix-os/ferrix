@@ -133,10 +133,31 @@ static ROOT: Once<Arc<Job>> = Once::new();
 /// The root job: cgroupfs's root, and every process's job until something
 /// moves it or it was forked from one elsewhere.
 ///
-/// Made by the first call, which bring-up makes (`main.rs`) before the first
-/// program runs, so the allocation is a boot one.
+/// It only reads: bring-up makes the root by [`make_root`] before the scheduler starts,
+/// so a call before that stops the boot by name (FX-0014; K16.5, ledger 10613).
 pub fn root() -> &'static Arc<Job> {
-    ROOT.call_once(|| {
+    match ROOT.get() {
+        Some(root) => root,
+        None => root_unmade(),
+    }
+}
+
+/// [`root`]'s stop, out of line, so that the callers it is inlined into carry one call
+/// and not each a formatted stop (ledger 10723 E3).
+#[cold]
+#[inline(never)]
+fn root_unmade() -> ! {
+    crate::panic::fatal!(
+        crate::panic::catalog::ROOT_JOB_UNMADE,
+        "the root job was asked for before bring-up made it"
+    )
+}
+
+/// Make the root job, once: bring-up's call, before the scheduler starts and before any
+/// program exists, so its allocation is a boot one (`check-fatal-alloc`, K16.5). A second
+/// call makes nothing.
+pub fn make_root() {
+    let _ = ROOT.call_once(|| {
         // FATAL-ALLOC: the root job is made once, during bring-up, before any
         // program exists to be told memory ran out.
         Job::new_tree_root().unwrap_or_else(|_| {
@@ -145,7 +166,7 @@ pub fn root() -> &'static Arc<Job> {
                 "no memory for the root job"
             )
         })
-    })
+    });
 }
 
 /// A job.

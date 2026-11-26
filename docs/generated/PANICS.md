@@ -29,6 +29,7 @@ Causes are listed most likely first.
 | [FX-0011](#fx-0011) | the address space ids ran out |
 | [FX-0012](#fx-0012) | the heap caches were drained with a cache lock held |
 | [FX-0013](#fx-0013) | a kernel heap free list's links disagree |
+| [FX-0014](#fx-0014) | the root job was asked for before bring-up made it |
 | [FX-0101](#fx-0101) | the loader's hand-off is not what the kernel needs |
 | [FX-0201](#fx-0201) | the frame allocator could not be built |
 | [FX-0202](#fx-0202) | the kernel address arena could not be created |
@@ -420,6 +421,23 @@ written over. Going on would write through an object still handed out.
 
 See: docs/HEAP-SLAB-GIVE-BACK.md; src/lib/kernel/heap/src/lib.rs;
 src/kernel/src/mm.rs.
+
+<a id="fx-0014"></a>
+
+## FX-0014 — the root job was asked for before bring-up made it
+
+Bring-up makes the root job of every process's tree once, by an explicit call,
+before the scheduler starts (`object::job::make_root`), and `job::root` only
+reads it: so the allocation that makes it is a boot one, which
+`check-fatal-alloc` can show from the image. Something asked for the root job
+before that call: a change to bring-up's order, or a new early user of jobs.
+
+1. A step of bring-up, or a program's start, moved ahead of the scheduler's
+   start.
+2. A build that compiles object/job.rs (linuxd's lift among them) does not call
+   make_root before its first root().
+
+See: src/kernel/src/object/job.rs; docs/microkernel/K16.md (K16.5).
 
 <a id="fx-0101"></a>
 
