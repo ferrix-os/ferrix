@@ -1595,8 +1595,8 @@ pub(super) fn check_address_waits() {
     };
     println!(
         "  addrwait {} waits woken across {} processes, by mapping and by handle, \
-         {} refusals as specified, a wake's walk {} ns per entry",
-        report.woken, report.processes, report.refusals, report.walk_ns,
+         {} refusals as specified, a wake's walk {} ns per entry; one sequence seen as {:?}",
+        report.woken, report.processes, report.refusals, report.walk_ns, report.sequence,
     );
 }
 

@@ -50,7 +50,21 @@ pub struct Report {
     pub refusals: u32,
     /// A wake's walk over a bucket, nanoseconds per entry it looked at.
     pub walk_ns: u64,
+    /// What [`one_sequence_is_seen_alike`] saw, step by step: the same under
+    /// `kernel_memory=heap` and `retyped` (K16.9, ledger 10576 Q2).
+    pub sequence: [u8; SEQUENCE.len()],
 }
+
+/// What a program sees of [`one_sequence_is_seen_alike`]'s steps, in order: each
+/// call's count, then the waiters left on the first word and on the second.
+/// One table for both memory models, so that a row of each compares them.
+const SEQUENCE: [u8; 15] = [
+    1, 2, 0, // a wake of one under bitset 0b10: the oldest, whose bitset is all
+    1, 1, 1, // a compared requeue of one: the next oldest moves
+    0, 1, 1, // a wake under 0b01 on the second word: its one waiter's bitset is 0b10
+    1, 0, 1, // a wake of one on the first word: the last there
+    1, 0, 0, // a wake of one on the second word: the moved waiter
+];
 
 /// Private words in the scratch region, each in the first page.
 const WORD: u64 = SCRATCH + 0x800;
@@ -261,6 +275,7 @@ pub fn run() -> Result<Report, &'static str> {
     a_shared_word_is_one_word_by_mapping_and_by_handle(&a, &b, &c, &mut report)?;
     wakes_take_the_oldest_and_match_bitsets(&a, &mut report)?;
     a_requeue_moves_waiters_across_buckets(&a, &mut report)?;
+    report.sequence = one_sequence_is_seen_alike(&a, &mut report)?;
     a_wait_on_many_words_answers_which(&a, &mut report)?;
     a_deadline_ends_a_wait_and_never_early(&a, &mut report)?;
     an_ending_process_ends_its_wait(&mut report)?;
@@ -661,6 +676,58 @@ fn a_requeue_moves_waiters_across_buckets(
     }
     report.woken += 2;
     Ok(())
+}
+
+/// Case 6b: one sequence of waits, wakes, a bitset and a requeue, and what a
+/// program sees of each step, held to [`SEQUENCE`] under both memory models: ring
+/// 0's one fixed bucket under `retyped` keeps arrival order, the bitset and the
+/// requeue as the heap's 256 do (K16.9, ledger 10576 Q2).
+///
+/// Verifies: L.object.339
+fn one_sequence_is_seen_alike(
+    a: &Side,
+    report: &mut Report,
+) -> Result<[u8; SEQUENCE.len()], &'static str> {
+    let (first, second) = (private(a, WORD), private(a, WORD_B));
+    set(a, WORD, 7)?;
+    for (slot, bitset) in [(0, u64::from(u32::MAX)), (1, 0b10), (2, u64::from(u32::MAX))] {
+        let deadline = deadline_in(a, slot, PATIENCE_NANOS)?;
+        start(slot, a, nr::ADDRESS_WAIT, [WORD, 7, bitset, 0, deadline, 0])?;
+        until_listed(core::slice::from_ref(&first), slot + 1)?;
+    }
+    let steps: [(usize, [u64; 6], Option<usize>); 5] = [
+        (nr::ADDRESS_WAKE, [WORD, 1, 0b10, 0, 0, 0], Some(0)),
+        (nr::ADDRESS_REQUEUE, [WORD, WORD_B, 0, 1, ADDRESS_COMPARE, 7], None),
+        (nr::ADDRESS_WAKE, [WORD_B, 2, 0b01, 0, 0, 0], None),
+        (nr::ADDRESS_WAKE, [WORD, 1, u64::from(u32::MAX), 0, 0, 0], Some(2)),
+        (nr::ADDRESS_WAKE, [WORD_B, 1, u64::from(u32::MAX), 0, 0, 0], Some(1)),
+    ];
+    let mut seen = [0_u8; SEQUENCE.len()];
+    for (step, (number, args, roused)) in steps.into_iter().enumerate() {
+        let count = a
+            .call(number, &args)
+            .map_err(|_| "addrwait: a step of the compared sequence was refused")?;
+        if let Some(slot) = roused
+            && answer(slot, PATIENCE_NANOS) != Some(Ok(0))
+        {
+            return Err("addrwait: the compared sequence roused another waiter than the oldest");
+        }
+        let left = [
+            address_wait::waiters_on(core::slice::from_ref(&first)),
+            address_wait::waiters_on(core::slice::from_ref(&second)),
+        ];
+        for (at, value) in [count, left[0], left[1]].into_iter().enumerate() {
+            let cell = seen
+                .get_mut(step * 3 + at)
+                .ok_or("addrwait: the compared sequence has more steps than its table")?;
+            *cell = u8::try_from(value).unwrap_or(u8::MAX);
+        }
+    }
+    if seen != SEQUENCE {
+        return Err("addrwait: a program sees the compared sequence differently under this memory model");
+    }
+    report.woken += 3;
+    Ok(seen)
 }
 
 /// A stale entry listed on `key`: the sabotage hook's, in a kernel with its
