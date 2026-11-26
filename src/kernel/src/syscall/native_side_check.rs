@@ -32,6 +32,7 @@ impl NativeSide {
     }
 
     /// A fresh process in `job`, with nothing mapped: a creator a job's limits bind (F-130).
+    #[cfg(ferrix_personality = "user")]
     pub(crate) fn in_job(job: Arc<Job>) -> Result<NativeSide, &'static str> {
         let space = AddressSpace::new().map_err(|_| "could not make a space")?;
         let host = Bare::new(space, job, None).map_err(|_| "could not make a process")?;
