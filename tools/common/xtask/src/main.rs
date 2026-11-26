@@ -72,6 +72,7 @@ mod adbd;
 mod apps;
 mod args;
 mod audio;
+mod boot_options;
 mod auth;
 mod badapple;
 mod box_log;
@@ -783,6 +784,7 @@ fn run() -> Result<()> {
         return parallel::run(command, &args);
     }
 
+    boot_options::set_command(command);
     match task::find(TASKS, command) {
         Some(task) => (task.run)(command, &args),
         None => Err(Error::new(format!(

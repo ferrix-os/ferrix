@@ -283,6 +283,9 @@ pub(crate) struct Profile {
     /// Its image keys (`image = { .. }`), in the file's order: what the
     /// image carries beside the kernel (docs/BUILD-FLAGS.md §3, "Not flags").
     pub(crate) image: Vec<(String, String)>,
+    /// The boot options it permits (`[boot_options]`), each with its values,
+    /// `*` for any one word (`crate::boot_options`).
+    pub(crate) boot_options: Vec<(String, Vec<String>)>,
 }
 
 impl Profile {
@@ -339,6 +342,35 @@ impl Profile {
                 .ok_or_else(|| what(&format!("image key {key} is not a string")))?;
             image.push((key.clone(), value.to_owned()));
         }
+        let mut boot_options = Vec::new();
+        for (option, permitted) in root
+            .get("boot_options")
+            .map(Value::entries)
+            .unwrap_or_default()
+        {
+            // A bare word the profile permits is `true`; an option with values, their list.
+            let mut values = Vec::new();
+            match permitted {
+                Value::Bool(true) => values.push("true".to_owned()),
+                Value::Array(items) => {
+                    for item in items {
+                        values.push(
+                            item.as_str()
+                                .ok_or_else(|| {
+                                    what(&format!("boot option {option}'s value is not a string"))
+                                })?
+                                .to_owned(),
+                        );
+                    }
+                }
+                _ => {
+                    return Err(what(&format!(
+                        "boot option {option} is neither `true` nor a list of values"
+                    )));
+                }
+            }
+            boot_options.push((option.clone(), values));
+        }
         Ok(Profile {
             name: name.to_owned(),
             level,
@@ -346,6 +378,7 @@ impl Profile {
             values,
             exceptions,
             image,
+            boot_options,
         })
     }
 }

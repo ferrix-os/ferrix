@@ -579,6 +579,8 @@ pub(crate) fn write_image_carrying(
     fs.add_file("FERRIX/INITRD.IMG", initramfs)?;
     std::fs::create_dir_all(paths::build_dir(arch))?;
     crate::initramfs::keep_image_manifest(arch, initramfs)?;
+    // What the kernel will read, against the profile's permitted set (LV.5).
+    crate::boot_options::judge(cmdline, defaults)?;
     // A kernel command line, when the caller has one: the loader reads it
     // from beside the kernel and hands it over in the boot info.
     if let Some(cmdline) = cmdline {
@@ -656,6 +658,7 @@ pub(crate) fn write_live_volume(
     )?;
     fs.add_file("FERRIX/KERNEL.ELF", kernel_bytes)?;
     fs.add_file("FERRIX/INITRD.IMG", carried)?;
+    crate::boot_options::judge(Some(cmdline), defaults)?;
     fs.add_file("FERRIX/CMDLINE.TXT", cmdline.as_bytes())?;
     if let Some(defaults) = defaults {
         fs.add_file(DEFAULTS_PATH, defaults.as_bytes())?;
