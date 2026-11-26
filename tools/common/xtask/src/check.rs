@@ -432,6 +432,11 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
             &["tools/common/check/check-kernel-roots.py", "--self-test"],
             // A part's file rustc read for ring 0 is a breach (ledger 7429 S.2).
             &["tools/common/check/check-kernel-shape.py", "--self-test"],
+            // K16.5's static tool, its self-test alone: the run builds two images (ledger 10834 L6).
+            &[
+                "tools/common/check/check-fatal-alloc-boot.py",
+                "--self-test",
+            ],
             // Each value's code in and out by nm, read by test-kernel-shape (ledger 7016 B.2).
             &["tools/common/check/check-value-symbols.py", "--self-test"],
             &["tools/common/check/check-first-rows.py"],
