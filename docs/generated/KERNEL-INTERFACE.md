@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3141 declarations in the core's files, 218 in the item's; 280 checks-only.
+3144 declarations in the core's files, 218 in the item's; 281 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2199,9 +2199,12 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `arena_needed` | fn | item |  |
 | `arena_refused` | fn | item |  |
+| `count_at_the_seal` | fn | item |  |
 | `note_payer` | fn | item |  |
 | `report` | fn | item |  |
+| `report_period` | fn | item |  |
 | `seal_after_boot` | fn | item |  |
+| `walk_at_reports` | fn | item (checks) | checks-only |
 
 ### `mm::seal_check`
 

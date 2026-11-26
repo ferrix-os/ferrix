@@ -148,6 +148,8 @@ Causes are listed most likely first.
 | [FX-0977](#fx-0977) | a kept resident count would go wrong |
 | [FX-0978](#fx-0978) | a kept page-cache count would go wrong |
 | [FX-0979](#fx-0979) | an anonymous mapping made beside another was not as required |
+| [FX-0981](#fx-0981) | the frames outside every promise could not be counted |
+| [FX-0983](#fx-0983) | a frame outside every promise is charged to no class on the list |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3545,6 +3547,38 @@ resident counts other than a recount.
 
 See: src/kernel/src/user/space.rs AddressSpace::place_beside;
 src/kernel/src/user/vmo.rs Vmo::join_window; docs/ANON-MERGE.md.
+
+<a id="fx-0981"></a>
+
+## FX-0981 — the frames outside every promise could not be counted
+
+At the seal the kernel walks every frame record and counts the frames held and
+drawn from no reservation, and holds that count equal to the allocator's own
+subtraction, the frames in use less those drawn from every promise. Two counts
+that must agree did not, so neither is evidence of what the kernel holds outside
+the promises, and the boot stops rather than report a figure nobody can trust.
+
+1. A frame was taken or freed by a route that does not move the allocator's
+   counts or the reservation's tags as the others do.
+2. The walk passed over a state of frame record it should count.
+
+See: src/kernel/src/mm/seal.rs; src/kernel/src/mm/reservation.rs;
+docs/microkernel/K16.md.
+
+<a id="fx-0983"></a>
+
+## FX-0983 — a frame outside every promise is charged to no class on the list
+
+A frame held and drawn from no reservation is the kernel's, a job's page or page
+table past its promise, or one the large area keeps on its chain, each named in
+`docs/microkernel/K16.md` with what bounds it. The walk at the seal found one
+whose frame record names none of these, so nothing states what bounds it.
+
+1. A new owner was written into a frame record without a class of its own on the
+   list.
+2. A frame record was overwritten.
+
+See: src/kernel/src/mm/seal.rs; docs/microkernel/K16.md.
 
 <a id="fx-1001"></a>
 

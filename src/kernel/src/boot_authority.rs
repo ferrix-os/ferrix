@@ -160,6 +160,7 @@ pub(crate) fn seal() {
         fatal!(catalog::FIRST_PROCESSES, "no promise for the kernel pool");
     }
     crate::mm::seal::seal_after_boot(pool.draws_from());
+    crate::mm::seal::count_at_the_seal();
     if let Some(check) = SEAL_CHECK.get()
         && let Err(why) = check(&promised, &bare)
     {
@@ -168,7 +169,7 @@ pub(crate) fn seal() {
     core::mem::forget(pool);
     fn report(_argument: usize) {
         loop {
-            crate::sched::sleep_for(10_000_000_000);
+            crate::sched::sleep_for(crate::mm::seal::report_period());
             crate::mm::seal::report();
         }
     }

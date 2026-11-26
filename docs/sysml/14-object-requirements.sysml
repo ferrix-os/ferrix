@@ -4229,6 +4229,21 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.17";
             attribute :>> unit = ("object::quota::Quota::set_reservation", "object::job::Job::set_reservation_by_call",
                 "object::job::Job::set_reservation_as", "syscall::native::job_reserve");
+        requirement <'L.object.349'> theFramesOutsideEveryPromiseAreCounted : ItemLowLevel {
+            attribute :>> statement = "Under kernel_memory=retyped the frames held outside every promise shall be counted
+                exactly, by class and payer; the kernel's share of them shall be bounded, at the seal and after it; and a
+                job's share shall be held by its quota.";
+            attribute :>> criterion = "Three parts (ledger 10639 F10). Held now, the first: at the seal on every
+                retyped boot mm::seal's walk of every frame record, a block's tail with its head, equals the allocator's
+                frames in use less those drawn from every entry, or the boot stops (FX-0981), and a frame charged to no
+                class of the list stops it (FX-0983); mm::seal_check reads that it ran and agreed; controls: a frame hidden
+                from the walk, and a class taken off the list, FIRED. Not yet held: the kernel's share bounded (a ceiling
+                at the seal per architecture and shape, a refusal at the allocation after it, FX-0982) and a job's share
+                held by its quota: the hard check's, after K16.9's fixed tables.";
+            attribute :>> parent = "H.MEM.32";
+            attribute :>> unit = ("mm::seal::count_at_the_seal", "mm::seal::walk_outside", "mm::seal::count_owned",
+                "mm::seal::judge", "mm::seal::say", "mm::seal::report", "mm::seal::report_period");
+            attribute :>> scope = "kernel_memory=retyped";
         }
         requirement <'L.object.346'> aFurtherPartitionHoldsItsRow : ItemLowLevel {
             attribute :>> statement = "A further Linux partition shall be started in a job and a region of its own with the

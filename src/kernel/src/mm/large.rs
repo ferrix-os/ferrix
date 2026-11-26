@@ -94,7 +94,7 @@ const UNIT_BYTES: u64 = UNIT_PAGES * PAGE_SIZE;
 /// job's slot (it has [`super::TABLE_OWNER`]'s bit and a slot past every
 /// limit), so a stray uncharge fails closed. Put back to none before the
 /// frame is freed.
-const KEPT_OWNER: u32 = u32::MAX - 1;
+pub(super) const KEPT_OWNER: u32 = u32::MAX - 1;
 
 /// The area's size for a machine of `ram` bytes: an eighth of RAM between
 /// 64 MiB and 2 GiB on the 64-bit pair, a quarter between 16 MiB and 128 MiB

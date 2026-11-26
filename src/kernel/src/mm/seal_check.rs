@@ -11,9 +11,15 @@ use crate::object::quota;
 /// Verifies: L.object.337
 /// Verifies: L.object.338
 /// Verifies: L.object.340
+/// Verifies: L.object.349
 /// What the seal is held to, on the boot's own thread, with `promised` a job with a
 /// promise and `bare` one with none, neither holding anything. Answers what failed.
 pub fn check(promised: &Job, bare: &Job) -> Result<(), &'static str> {
+    // The frames outside every promise were walked at the seal and agreed with the
+    // allocator's own count (L.object.349's first part, ledger 10892 P5).
+    if !super::seal::walked_and_agreed_at_the_seal() {
+        return Err("the frames outside every promise were not counted at the seal");
+    }
     // The allocator itself, not `alloc::alloc`: the compiler may drop a pair of calls
     // to that, answer "not null" with no allocation, and so pass or fail this by how it
     // inlined (a boot in eight once read a planted request as served).

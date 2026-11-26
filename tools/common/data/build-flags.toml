@@ -231,6 +231,12 @@ test_only = true
 rows_only = true
 why = "check-only, permitted by no profile (rows_only, check-build-flags.py): the call number of process_create_shared ring 0 refuses once with NO_MEMORY, so test-refused-fork's one image shows linuxd answering a refused start to the forking program as EAGAIN (F-129, ledger 10775 X1, 10812 Y4). Compiled into every build with checks=on, certified profiles included, and out of a checks=off build (symbols and strings); a profile's command line may not carry it (syscall/native/region.rs, checks.rs)"
 
+[boot_options."ferrix.check_walk_outside"]
+values = ["*"]
+test_only = true
+rows_only = true
+why = "check-only, permitted by no profile (rows_only, check-build-flags.py): under kernel_memory=retyped the seal's report walks the frame records at that many reports, by class and payer, and judges them as the seal's walk does (F.8's report, ledger 10892 P1); the product walks once, at the seal. Compiled into a retyped build with checks=on and out of every other (checks.rs, mm/seal.rs)"
+
 [boot_options."ferrix.root"]
 values = ["*"]
 why = "the root filesystem: a disk, or tmpfs"

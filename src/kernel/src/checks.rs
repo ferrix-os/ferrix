@@ -45,6 +45,11 @@ const RUN: &str = "run";
 #[cfg(ferrix_checks = "on")]
 const REFUSE_PROCESS_OPTION: &str = "ferrix.check_refuse_process";
 
+/// A check-only option: walk the frame records at that many of the seal's reports (F.8's
+/// report, ledger 10892 P1). Read only in a `retyped` kernel with its checks.
+#[cfg(all(ferrix_checks = "on", ferrix_kernel_memory = "retyped"))]
+const WALK_OUTSIDE_OPTION: &str = "ferrix.check_walk_outside";
+
 /// Read `ferrix.checks`, and say what it asked for.
 ///
 /// Any value but the two is reported and ignored: running every check is the
@@ -86,6 +91,15 @@ pub fn init(view: &BootView<'_>) {
         println!(
             "  checks   {REFUSE_PROCESS_OPTION}={at}: that call of process_create_shared is refused"
         );
+    }
+    // F.8's report: the walk after the seal, for a row that reads it.
+    #[cfg(all(ferrix_checks = "on", ferrix_kernel_memory = "retyped"))]
+    if let Some(reports) = view
+        .option(WALK_OUTSIDE_OPTION)
+        .and_then(|value| value.parse::<u32>().ok())
+    {
+        crate::mm::seal::walk_at_reports(reports);
+        println!("  checks   {WALK_OUTSIDE_OPTION}={reports}: that many reports walk the frames");
     }
     // The way out's check that no poster forgot its bit runs with the rest
     // (`sched::work::audit`); the core keeps its own copy of the answer.

@@ -4462,6 +4462,42 @@ pub static RETYPED: Explanation = Explanation {
     see: "src/kernel/src/linuxd_start.rs; src/kernel/src/mm/seal.rs; docs/microkernel/K16.md",
 };
 
+/// F.8 (`docs/microkernel/K16.md`, ledger 10639 F1): under `kernel_memory=retyped` the frames
+/// outside every promise, walked at the seal, disagree with the allocator's own count.
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub(crate) static RETYPED_UNCOUNTED: Explanation = Explanation {
+    code: "FX-0981",
+    title: "the frames outside every promise could not be counted",
+    meaning: "At the seal the kernel walks every frame record and counts the frames held and \
+              drawn from no reservation, and holds that count equal to the allocator's own \
+              subtraction, the frames in use less those drawn from every promise. Two counts \
+              that must agree did not, so neither is evidence of what the kernel holds outside \
+              the promises, and the boot stops rather than report a figure nobody can trust.",
+    causes: &[
+        "A frame was taken or freed by a route that does not move the allocator's counts or \
+         the reservation's tags as the others do.",
+        "The walk passed over a state of frame record it should count.",
+    ],
+    see: "src/kernel/src/mm/seal.rs; src/kernel/src/mm/reservation.rs; docs/microkernel/K16.md",
+};
+
+/// F.8 (`docs/microkernel/K16.md`, ledger 10639 F3): under `kernel_memory=retyped` a frame
+/// outside every promise is charged to no class the closed list names.
+#[cfg(ferrix_kernel_memory = "retyped")]
+pub(crate) static RETYPED_UNLISTED: Explanation = Explanation {
+    code: "FX-0983",
+    title: "a frame outside every promise is charged to no class on the list",
+    meaning: "A frame held and drawn from no reservation is the kernel's, a job's page or \
+              page table past its promise, or one the large area keeps on its chain, each \
+              named in `docs/microkernel/K16.md` with what bounds it. The walk at the seal found \
+              one whose frame record names none of these, so nothing states what bounds it.",
+    causes: &[
+        "A new owner was written into a frame record without a class of its own on the list.",
+        "A frame record was overwritten.",
+    ],
+    see: "src/kernel/src/mm/seal.rs; docs/microkernel/K16.md",
+};
+
 /// For the watchdog (`watchdog.rs`): user space stopped feeding
 /// `/dev/watchdog` within the timeout its opener set.
 pub(crate) static WATCHDOG_STARVED: Explanation = Explanation {
@@ -4677,6 +4713,10 @@ pub(crate) static ALL: &[&Explanation] = &[
     &RSS_COUNT_BROKEN,
     &CACHE_COUNT_BROKEN,
     &ANON_MERGE_BROKEN,
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    &RETYPED_UNCOUNTED,
+    #[cfg(ferrix_kernel_memory = "retyped")]
+    &RETYPED_UNLISTED,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

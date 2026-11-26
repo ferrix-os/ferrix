@@ -843,7 +843,7 @@
     },
     "checks.rs": {
       "ring": "item",
-      "reached": "53, 60, 63, 65, 98"
+      "reached": "58, 65, 68, 70, 112"
     },
     "console/log_check.rs": {
       "ring": "core",
