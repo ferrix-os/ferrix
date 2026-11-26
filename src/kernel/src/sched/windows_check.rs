@@ -515,6 +515,9 @@ static TR_WOKE: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
 static TR_CPU: [AtomicU64; THREADS] = [const { AtomicU64::new(99) }; THREADS];
 static TR_END: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
 static TR_ENDCPU: [AtomicU64; THREADS] = [const { AtomicU64::new(99) }; THREADS];
+static TR_ITER: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
+static TR_GAP: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
+static TR_GAPAT: [AtomicU64; THREADS] = [const { AtomicU64::new(0) }; THREADS];
 fn tr_cpu() -> u64 {
     super::current().map_or(98, |task| task.cpu() as u64)
 }
@@ -528,9 +531,30 @@ fn spinner(index: usize) {
         at.store(until - RUN, Ordering::Relaxed);
         cpu.store(tr_cpu(), Ordering::Relaxed);
     }
-    while crate::timer::now_nanos() < until {
+    let mut prev = until - RUN;
+    let mut iters = 0_u64;
+    let mut gap = 0_u64;
+    let mut gap_at = 0_u64;
+    loop {
+        let now = crate::timer::now_nanos();
+        if now - prev > gap {
+            gap = now - prev;
+            gap_at = prev;
+        }
+        prev = now;
+        if now >= until {
+            break;
+        }
+        iters += 1;
         sample(index);
         core::hint::spin_loop();
+    }
+    if let (Some(a), Some(b), Some(c)) =
+        (TR_ITER.get(index), TR_GAP.get(index), TR_GAPAT.get(index))
+    {
+        a.store(iters, Ordering::Relaxed);
+        b.store(gap, Ordering::Relaxed);
+        c.store(gap_at, Ordering::Relaxed);
     }
     if let (Some(at), Some(cpu)) = (TR_END.get(index), TR_ENDCPU.get(index)) {
         at.store(crate::timer::now_nanos(), Ordering::Relaxed);
@@ -1088,7 +1112,7 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
         let rel = |at: &[AtomicU64; THREADS], index: usize| load(at, index) as i64 - epoch;
         for index in 0..THREADS {
             crate::println!(
-                "  wtrace   {} spawned {} woke {} start {} cpu {} end {} cpu {} first {} last {} inside {} (ns from epoch; held {})",
+                "  wtrace   {} spawned {} woke {} start {} cpu {} end {} cpu {} first {} last {} inside {} iters {} gap {} at {} (ns from epoch; held {})",
                 NAMES.get(index).copied().unwrap_or("?"),
                 rel(&TR_SPAWNED, index),
                 rel(&TR_WOKE, index),
@@ -1099,6 +1123,9 @@ pub fn run() -> Result<alloc::string::String, &'static str> {
                 rel(&FIRST, index),
                 rel(&LAST, index),
                 load(&INSIDE, index),
+                load(&TR_ITER, index),
+                load(&TR_GAP, index),
+                rel(&TR_GAPAT, index),
                 held
             );
         }
