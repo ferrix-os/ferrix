@@ -52,19 +52,9 @@ pub struct Report {
     pub walk_ns: u64,
     /// What [`one_sequence_is_seen_alike`] saw, step by step: the same under
     /// `kernel_memory=heap` and `retyped` (K16.9, ledger 10576 Q2).
-    pub sequence: [u8; SEQUENCE.len()],
+    pub sequence: [u8; address_wait::SEQUENCE.len()],
 }
 
-/// What a program sees of [`one_sequence_is_seen_alike`]'s steps, in order: each
-/// call's count, then the waiters left on the first word and on the second.
-/// One table for both memory models, so that a row of each compares them.
-const SEQUENCE: [u8; 15] = [
-    1, 2, 0, // a wake of one under bitset 0b10: the oldest, whose bitset is all
-    1, 1, 1, // a compared requeue of one: the next oldest moves
-    0, 1, 1, // a wake under 0b01 on the second word: its one waiter's bitset is 0b10
-    1, 0, 1, // a wake of one on the first word: the last there
-    1, 0, 0, // a wake of one on the second word: the moved waiter
-];
 
 /// Private words in the scratch region, each in the first page.
 const WORD: u64 = SCRATCH + 0x800;
@@ -679,7 +669,7 @@ fn a_requeue_moves_waiters_across_buckets(
 }
 
 /// Case 6b: one sequence of waits, wakes, a bitset and a requeue, and what a
-/// program sees of each step, held to [`SEQUENCE`] under both memory models: ring
+/// program sees of each step, held to [`address_wait::SEQUENCE`] under both memory models: ring
 /// 0's one fixed bucket under `retyped` keeps arrival order, the bitset and the
 /// requeue as the heap's 256 do (K16.9, ledger 10576 Q2).
 ///
@@ -687,7 +677,7 @@ fn a_requeue_moves_waiters_across_buckets(
 fn one_sequence_is_seen_alike(
     a: &Side,
     report: &mut Report,
-) -> Result<[u8; SEQUENCE.len()], &'static str> {
+) -> Result<[u8; address_wait::SEQUENCE.len()], &'static str> {
     let (first, second) = (private(a, WORD), private(a, WORD_B));
     set(a, WORD, 7)?;
     for (slot, bitset) in [(0, u64::from(u32::MAX)), (1, 0b10), (2, u64::from(u32::MAX))] {
@@ -702,7 +692,7 @@ fn one_sequence_is_seen_alike(
         (nr::ADDRESS_WAKE, [WORD, 1, u64::from(u32::MAX), 0, 0, 0], Some(2)),
         (nr::ADDRESS_WAKE, [WORD_B, 1, u64::from(u32::MAX), 0, 0, 0], Some(1)),
     ];
-    let mut seen = [0_u8; SEQUENCE.len()];
+    let mut seen = [0_u8; address_wait::SEQUENCE.len()];
     for (step, (number, args, roused)) in steps.into_iter().enumerate() {
         let count = a
             .call(number, &args)
@@ -723,7 +713,7 @@ fn one_sequence_is_seen_alike(
             *cell = u8::try_from(value).unwrap_or(u8::MAX);
         }
     }
-    if seen != SEQUENCE {
+    if seen != address_wait::SEQUENCE {
         return Err("addrwait: a program sees the compared sequence differently under this memory model");
     }
     report.woken += 3;

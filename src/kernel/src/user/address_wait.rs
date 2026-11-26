@@ -376,6 +376,19 @@ const BUCKET_BITS: u32 = 0;
 /// Buckets in [`TABLE`].
 pub(crate) const BUCKETS: usize = 1 << BUCKET_BITS;
 
+// CHECKS-ONLY: user/address_wait_check.rs, object/rehome_check.rs
+/// What a program sees of the self-checks' compared sequence, in order: each call's count, then
+/// the waiters left on the first word and on the second. One table for both memory models
+/// (K16.9, ledger 10576 Q2): stage 9's program-driven case and stage 6's taskless one hold it.
+#[doc(hidden)]
+pub const SEQUENCE: [u8; 15] = [
+    1, 2, 0, // a wake of one under bitset 0b10: the oldest, whose bitset is all
+    1, 1, 1, // a compared requeue of one: the next oldest moves
+    0, 1, 1, // a wake under 0b01 on the second word: its one waiter's bitset is 0b10
+    1, 0, 1, // a wake of one on the first word: the last there
+    1, 0, 0, // a wake of one on the second word: the moved waiter
+];
+
 // CHECKS-ONLY: user/address_wait_check.rs
 /// [`BUCKETS`], for the self-check: one in ring 0 under `retyped` (K16.9).
 #[doc(hidden)]
@@ -1193,7 +1206,7 @@ pub fn bucket_room(index: usize) -> (usize, usize) {
 /// (K5's review, condition 4).
 #[cfg(ferrix_checks = "on")]
 pub mod sabotage {
-    use super::{Arc, AtomicUsize, Charge, Entry, Key, MATCH_ANY, Sleeper};
+    use super::{Arc, AtomicUsize, Charge, Entry, Key, MATCH_ANY, NOT_WOKEN, Sleeper};
     use super::{bucket_lock, fallible, leave, push_within, rouse};
 
     /// Take up to `limit` waiters off `keys` and report them woken without
@@ -1251,23 +1264,57 @@ pub mod sabotage {
     /// `Err(())` when memory is refused.
     #[expect(clippy::result_unit_err, reason = "a check's hook: no error to name")]
     pub fn list_stale_entry(key: Key) -> Result<StaleEntry, ()> {
+        list_taskless(key, MATCH_ANY, 0, 1).map(StaleEntry)
+    }
+
+    /// A waiter with no task, listed on one word: what a wake and a requeue find
+    /// of a real one, without a program (K16.9, ledger 10576 Q2).
+    #[derive(Debug)]
+    pub struct Parked(Arc<Sleeper>);
+
+    impl Parked {
+        /// Whether a wake took it.
+        pub fn woken(&self) -> bool {
+            self.0.woken.load(core::sync::atomic::Ordering::Acquire) != NOT_WOKEN
+        }
+
+        /// Off the table, as its waiter's own leaving would take it.
+        pub fn leave(self) {
+            leave(&self.0, 0);
+        }
+    }
+
+    /// List a [`Parked`] waiter on `key` under `bitset`. Uncharged: only a
+    /// self-check makes one.
+    ///
+    /// # Errors
+    ///
+    /// `Err(())` when memory is refused.
+    #[expect(clippy::result_unit_err, reason = "a check's hook: no error to name")]
+    pub fn park(key: Key, bitset: u32) -> Result<Parked, ()> {
+        list_taskless(key, bitset, NOT_WOKEN, 0).map(Parked)
+    }
+
+    /// A taskless sleeper whose entry for `slot` is listed on `key`.
+    fn list_taskless(key: Key, bitset: u32, woken: usize, slot: usize) -> Result<Arc<Sleeper>, ()> {
         let bucket = key.bucket();
-        let mut buckets = fallible::try_with_capacity(2).map_err(|_| ())?;
-        // NOALLOC: reserved just above.
-        let _ = fallible::push_within(&mut buckets, AtomicUsize::new(bucket));
-        let _ = fallible::push_within(&mut buckets, AtomicUsize::new(bucket));
+        let mut buckets = fallible::try_with_capacity(slot + 1).map_err(|_| ())?;
+        for _ in 0..=slot {
+            // NOALLOC: reserved just above.
+            let _ = fallible::push_within(&mut buckets, AtomicUsize::new(bucket));
+        }
         let sleeper = fallible::try_arc(Sleeper {
             task: None,
-            woken: AtomicUsize::new(0),
+            woken: AtomicUsize::new(woken),
             buckets,
             charge: Charge::none(),
         })
         .map_err(|_| ())?;
         let entry = Entry {
             key,
-            bitset: MATCH_ANY,
+            bitset,
             sleeper: Arc::clone(&sleeper),
-            slot: 1,
+            slot,
         };
         loop {
             let mut table = bucket_lock(bucket).lock();
@@ -1281,7 +1328,7 @@ pub mod sabotage {
             let refused = push_within(&mut table, entry).err();
             drop(table);
             drop(refused);
-            return Ok(StaleEntry(sleeper));
+            return Ok(sleeper);
         }
     }
 }

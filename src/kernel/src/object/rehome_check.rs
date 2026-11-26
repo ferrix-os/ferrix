@@ -23,12 +23,12 @@ use crate::object::process::{self, Bootstrap, GiveRefused, Host, Process};
 use crate::object::quota::{self, Counter, Pending, Quota, Resource};
 use crate::user::space::{Access, AddressSpace};
 
-/// How many cases one run makes: the boot line's count.
-#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
-const CASES: u64 = 19;
-/// One more in ring 0 under `retyped`: its boot-sized tables (K16.9).
-#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
-const CASES: u64 = 20;
+/// How many cases one run makes: the boot line's count. One more in ring 0 under `retyped`
+/// (its boot-sized tables, K16.9) and one more in a kernel with its checks (the address waits'
+/// compared sequence, K16.9).
+const CASES: u64 = 19
+    + cfg!(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))) as u64
+    + cfg!(ferrix_checks = "on") as u64;
 
 /// A nanosecond figure of a millisecond.
 const MS: u64 = 1_000_000;
@@ -64,6 +64,8 @@ pub fn run() -> Result<u64, &'static str> {
     check_a_reaped_pid_finds_nothing()?;
     #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
     check_the_tables_are_their_boot_size()?;
+    #[cfg(ferrix_checks = "on")]
+    check_one_sequence_is_seen_alike()?;
     Ok(CASES)
 }
 
@@ -739,6 +741,65 @@ fn check_the_tables_are_their_boot_size() -> Result<(), &'static str> {
     }
     if parent.new_child().is_err() {
         return Err("the quota table refused a job while it had room");
+    }
+    Ok(())
+}
+
+/// Ring 0's address waits under either memory model: one sequence of taskless waiters, a wake
+/// under a bitset, a compared requeue and wakes on both words, and what a program would see of
+/// each step held to [`address_wait::SEQUENCE`], one table for `heap`'s 256 buckets and
+/// `retyped`'s one fixed bucket (K16.9, ledger 10576 Q2). Stage 9's program-driven check holds
+/// the same table where ring 0 loads programs; a retyped ring 0 loads none, so this is its half.
+///
+/// Verifies: L.object.339
+#[cfg(ferrix_checks = "on")]
+fn check_one_sequence_is_seen_alike() -> Result<(), &'static str> {
+    use crate::user::address_wait::{self, Key, MATCH_ANY, SEQUENCE, Word, sabotage};
+    use crate::user::vmo::Vmo;
+    let space = AddressSpace::new().map_err(|_| "no address space for the compared sequence")?;
+    let object = Vmo::new_anonymous(1).map_err(|_| "no object for the compared sequence")?;
+    let first = Key::in_object(Arc::clone(&object), 0x40);
+    let second = Key::in_object(Arc::clone(&object), 0x44);
+    let mut parked = [None, None, None];
+    for (cell, bitset) in parked.iter_mut().zip([MATCH_ANY, 0b10, MATCH_ANY]) {
+        *cell = Some(
+            sabotage::park(first.clone(), bitset)
+                .map_err(|_| "no memory for the compared sequence's waiters")?,
+        );
+    }
+    let woken = |slot: usize| parked.get(slot).and_then(Option::as_ref).is_some_and(sabotage::Parked::woken);
+    let mut seen = [0_u8; SEQUENCE.len()];
+    for step in 0..5 {
+        let (count, roused) = match step {
+            0 => (address_wait::wake(&first, 1, 0b10), Some(0)),
+            1 => (
+                address_wait::requeue(&space, &first, &second, (0, 1), None::<&Word>)
+                    .map_err(|_| "the compared sequence's requeue was refused")?,
+                None,
+            ),
+            2 => (address_wait::wake(&second, 2, 0b01), None),
+            3 => (address_wait::wake(&first, 1, MATCH_ANY), Some(2)),
+            _ => (address_wait::wake(&second, 1, MATCH_ANY), Some(1)),
+        };
+        if roused.is_some_and(|slot| !woken(slot)) {
+            return Err("the compared sequence roused another waiter than the oldest");
+        }
+        let left = [
+            address_wait::waiters_on(core::slice::from_ref(&first)),
+            address_wait::waiters_on(core::slice::from_ref(&second)),
+        ];
+        for (at, value) in [count, left[0], left[1]].into_iter().enumerate() {
+            let cell = seen
+                .get_mut(step * 3 + at)
+                .ok_or("the compared sequence has more steps than its table")?;
+            *cell = u8::try_from(value).unwrap_or(u8::MAX);
+        }
+    }
+    for waiter in parked.into_iter().flatten() {
+        waiter.leave();
+    }
+    if seen != SEQUENCE {
+        return Err("the address waits' compared sequence is seen differently under this memory model");
     }
     Ok(())
 }
