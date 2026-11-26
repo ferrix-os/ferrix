@@ -28,6 +28,15 @@ use crate::sync::SpinLock;
 use crate::trap::{FaultOutcome, ReturnPath};
 use crate::user::space::AddressSpace;
 
+/// Why [`Bare::new_within`] made nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refused {
+    /// Its job, or one above it, is at its `Resource::Tasks` limit (F-130).
+    Limited,
+    /// No memory for it.
+    NoMemory,
+}
+
 /// The process.
 #[derive(Debug)]
 pub struct Bare {
@@ -150,19 +159,39 @@ impl Bare {
     ///
     /// # Errors
     ///
-    /// [`AllocError`].
+    /// [`AllocError`], and past its job's task limit (F-130).
     pub fn new(
         space: Arc<AddressSpace>,
         job: Arc<Job>,
         region: Option<Arc<Region>>,
     ) -> Result<Arc<Bare>, AllocError> {
+        Bare::new_within(space, job, region).map_err(|_| AllocError)
+    }
+
+    /// [`Bare::new`], saying why it was refused: past its job's task limit, or with no
+    /// memory. A process its job's `Resource::Tasks` limit refuses is not made: dropped
+    /// before anyone holds it, it gives its count and its pid back, as native
+    /// `process_create`'s refused child does through `move_new_to` (F-130, ledger 10775 G2,
+    /// 10906).
+    ///
+    /// # Errors
+    ///
+    /// [`Refused::Limited`] past the task limit; [`Refused::NoMemory`].
+    pub fn new_within(
+        space: Arc<AddressSpace>,
+        job: Arc<Job>,
+        region: Option<Arc<Region>>,
+    ) -> Result<Arc<Bare>, Refused> {
         let pid = process::allocate().unwrap_or(0);
-        let core = Process::new(space, pid, job)?;
+        let core = Process::new(space, pid, job).map_err(|_| Refused::NoMemory)?;
+        if core.over_quota() {
+            return Err(Refused::Limited);
+        }
         let core = match region {
             Some(region) => core.in_region(region),
             None => core,
         };
-        let core = fallible::try_arc(core)?;
+        let core = fallible::try_arc(core).map_err(|_| Refused::NoMemory)?;
         let host = fallible::try_arc_cyclic(|me: &Weak<Bare>| Bare {
             core,
             live: AtomicU32::new(0),
@@ -170,13 +199,14 @@ impl Bare {
             released: AtomicBool::new(false),
             started: AtomicBool::new(false),
             me: me.clone(),
-        })?;
+        })
+        .map_err(|_| Refused::NoMemory)?;
         let weak: Weak<dyn Host> = {
             let as_host: Arc<dyn Host> = host.clone();
             Arc::downgrade(&as_host)
         };
         if pid != 0 {
-            process::name(pid, weak)?;
+            process::name(pid, weak).map_err(|_| Refused::NoMemory)?;
         }
         Ok(host)
     }

@@ -23,7 +23,7 @@ use crate::discovery::{devmgr, first_image};
 use crate::fallible;
 use crate::first_rows::{Held, MANAGER};
 use crate::object::Object;
-use crate::object::bare::Bare;
+use crate::object::bare::{Bare, Refused};
 use crate::object::channel::{Endpoint, ReadError, Sender};
 use crate::object::job;
 use crate::object::process::{self, Host};
@@ -229,7 +229,13 @@ fn make(creator: Option<&dyn Host>, _name: &[u8]) -> Result<Arc<dyn Host>, Errno
     if creator.is_none() {
         space.measure();
     }
-    let host = Bare::new(space, job, None).map_err(|_| status::NO_MEMORY)?;
+    // Built in the creator's job and moved after: a creator at its own task limit is refused
+    // here, fail-closed, even for a child meant for a job with room, and answers as
+    // `process_create` does at the limit (F-130, ledger 10968 X1).
+    let host = Bare::new_within(space, job, None).map_err(|why| match why {
+        Refused::Limited => status::SHOULD_WAIT,
+        Refused::NoMemory => status::NO_MEMORY,
+    })?;
     Ok(host)
 }
 

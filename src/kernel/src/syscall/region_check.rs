@@ -17,6 +17,7 @@ use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::{Rights, SAME_RIGHTS};
 use ferrix_native_abi::signals::Signals;
+use ferrix_native_abi::status;
 use ferrix_native_abi::types::{MAP_EXECUTE, MAP_READ, MAP_WRITE};
 
 use crate::discovery;
@@ -262,6 +263,8 @@ fn run() -> Result<Report, &'static str> {
         .map_err(|_| "no room for the check's job")?;
     let job = side.handle(nr::JOB_CREATE, &[reg(root_handle), 0], "job_create failed")?;
     refusals(&side, job)?;
+    a_creator_at_its_task_limit_makes_nothing(&root)?;
+    a_region_process_past_its_jobs_task_limit_is_refused(&side, root_handle)?;
     let region = side.handle(
         nr::REGION_CREATE,
         &[reg(job), OUT_AT],
@@ -353,6 +356,110 @@ fn run() -> Result<Report, &'static str> {
     }
     fault_ends_the_region(&side, root_handle)?;
     Ok(report)
+}
+
+/// F-130 (ledger 10775 G2, 10906): a region's processes in a job limited to `LIMIT` tasks,
+/// made through `process_create_shared`: the one past the limit is refused with
+/// `process_create`'s own status at the limit, `SHOULD_WAIT`, and nothing of it is made
+/// or counted; once one of them is gone, the next is made.
+///
+/// Verifies: L.object.81
+fn a_region_process_past_its_jobs_task_limit_is_refused(
+    side: &Side,
+    root: Handle,
+) -> Result<(), &'static str> {
+    const LIMIT: u64 = 2;
+    let job = side.handle(nr::JOB_CREATE, &[reg(root), 0], "job_create failed")?;
+    side.put(STATUS_AT, &LIMIT.to_ne_bytes())?;
+    let _ = side
+        .call(
+            nr::JOB_SET_LIMIT,
+            &[reg(job), ferrix_native_abi::types::JOB_TASKS, STATUS_AT],
+        )
+        .map_err(|_| "job_set_limit on the tasks failed")?;
+    let region = side.handle(
+        nr::REGION_CREATE,
+        &[reg(job), OUT_AT],
+        "region_create failed",
+    )?;
+    side.put(NAME_AT, b"f130")?;
+    let make = || {
+        side.call(
+            nr::PROCESS_CREATE_SHARED,
+            &[reg(region), reg(job), 0, NAME_AT, 4, OUT_AT],
+        )
+    };
+    let mut made = [0_usize; LIMIT as usize];
+    for slot in &mut made {
+        *slot = make().map_err(|_| "a region's process under its job's task limit was refused")?;
+    }
+    let used = |side: &Side| -> Result<u64, &'static str> {
+        let _ = side
+            .call(
+                nr::JOB_GET_QUOTA,
+                &[reg(job), ferrix_native_abi::types::JOB_TASKS, STATUS_AT],
+            )
+            .map_err(|_| "job_get_quota failed")?;
+        Ok(u64::from(side.get_u32(STATUS_AT)?) | (u64::from(side.get_u32(STATUS_AT + 4)?) << 32))
+    };
+    if make() != Err(status::SHOULD_WAIT) {
+        return Err("process_create_shared made a region's process past its job's task limit");
+    }
+    if used(side)? != LIMIT {
+        return Err("a region's process refused at its job's task limit was counted");
+    }
+    let _ = side.call(nr::HANDLE_CLOSE, &[made[0] as u64]);
+    let again =
+        make().map_err(|_| "a region's process was refused after one of its job's had gone")?;
+    for handle in [made[1], again] {
+        let _ = side.call(nr::HANDLE_CLOSE, &[handle as u64]);
+    }
+    let _ = side.call(nr::HANDLE_CLOSE, &[reg(region)]);
+    let _ = side.call(nr::HANDLE_CLOSE, &[reg(job)]);
+    Ok(())
+}
+
+/// F-130 (ledger 10968 X2): `process_make` builds its child in the creator's job and moves it
+/// after, so a creator at its own task limit makes nothing, `SHOULD_WAIT`, its job's count
+/// unchanged; once its child has gone, it makes one again.
+///
+/// Verifies: L.object.81
+fn a_creator_at_its_task_limit_makes_nothing(root: &Arc<Job>) -> Result<(), &'static str> {
+    use crate::object::quota::Resource;
+    const LIMIT: u64 = 2;
+    let job = root
+        .new_child()
+        .map_err(|_| "no job for the creator's case")?;
+    if !job.set_limit(Resource::Tasks, LIMIT) {
+        return Err("the creator's job took no task limit");
+    }
+    let creator = Side::in_job(Arc::clone(&job))?;
+    let _ = creator
+        .space()
+        .map_anonymous(BUFFER_AT, BUFFER_BYTES, ferrix_vma::VmaFlags::READ_WRITE)
+        .map_err(|_| "no room for the creator's buffers")?;
+    let own = creator
+        .with_handles(|table| table.insert(Object::Job(Arc::clone(&job)), Rights::JOB))
+        .map_err(|_| "no room for the creator's own job")?;
+    creator.put(NAME_AT, b"f130")?;
+    let make = || creator.call(nr::PROCESS_MAKE, &[reg(own), NAME_AT, 4]);
+    let used = || {
+        job.usage(Resource::Tasks)
+            .map_or(u64::MAX, |usage| usage.used)
+    };
+    let first = make().map_err(|_| "a creator under its job's task limit was refused")?;
+    if make() != Err(status::SHOULD_WAIT) {
+        return Err("process_make made a process past its creator's task limit");
+    }
+    if used() != LIMIT {
+        return Err("a process refused at its creator's task limit was counted");
+    }
+    let _ = creator.call(nr::HANDLE_CLOSE, &[first as u64]);
+    let again = make().map_err(|_| "a creator was refused after its child had gone")?;
+    let _ = creator.call(nr::HANDLE_CLOSE, &[again as u64]);
+    #[cfg(ferrix_personality = "user")]
+    creator.end(0);
+    Ok(())
 }
 
 /// A thread's window went with it, and its frames and charge with that (ledger 6787 W11): back

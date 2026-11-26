@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3144 declarations in the core's files, 218 in the item's; 281 checks-only.
+3146 declarations in the core's files, 218 in the item's; 281 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2266,6 +2266,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `Refused` | enum | item |  |
 | `current_thread` | fn | item |  |
 | `leave_current` | fn | item |  |
 | `spawn_on` | fn | item (checks) | checks-only |
@@ -2275,6 +2276,7 @@ checks above is `pub` for raised checks (F3).
 | `ThreadRef` | struct | item |  |
 | `Bare::end` | method | item, load, bin |  |
 | `Bare::new` | method | item, load, bin |  |
+| `Bare::new_within` | method | item |  |
 | `Bare::spawn` | method | item, load |  |
 | `Bare::spawn_with` | method | item |  |
 | `Bare::start` | method | item, load, bin |  |

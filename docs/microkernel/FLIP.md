@@ -216,7 +216,7 @@ above: nothing of an AArch64 image changes with a `built_on` word.
 
 ## Where it stands
 
-* 2026-11-26, ledger 10906: F-130 is open (Moderate): `process_create_shared` makes a region's process past its job's task limit, so `fast`'s user kernel does not bound linuxd's processes by a job's `pids.max`; owed before `fast` is called whole on it.
+* 2026-11-26, ledger 10906: F-130, `process_create_shared` making a region's process past its job's task limit, was filed open and closed the same day: a native making now refuses at the limit with `SHOULD_WAIT`.
 
 * 2026-11-26, ledger 10859 K3: a `max` image, built `checks=on` as every profile is, reads the test-only boot words compiled in with the checks (`ferrix.check_refuse_process`, F-129's; `ferrix.scrub`) though no profile permits them, until item 4's rule refuses a boot whose line carries a word its profile does not permit. That stands among what refuses `max`. `check-build-flags.py` refuses a profile that permits a `rows_only` word at any level.
 

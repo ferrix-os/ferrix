@@ -31,6 +31,13 @@ impl NativeSide {
         Ok(NativeSide { host })
     }
 
+    /// A fresh process in `job`, with nothing mapped: a creator a job's limits bind (F-130).
+    pub(crate) fn in_job(job: Arc<Job>) -> Result<NativeSide, &'static str> {
+        let space = AddressSpace::new().map_err(|_| "could not make a space")?;
+        let host = Bare::new(space, job, None).map_err(|_| "could not make a process")?;
+        Ok(NativeSide { host })
+    }
+
     /// End its process with `status`: what it holds, its handles among them,
     /// is let go once no thread of it is live, and it never had one
     /// (`Bare::end`).

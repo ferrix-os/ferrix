@@ -1434,13 +1434,23 @@ package FerrixObjectRequirements {
             attribute :>> statement = "Process::new shall make a process counted in
                 its job and charged one task there; when the job's task limit
                 refuses the charge it shall be marked over quota and charge
-                nothing.";
+                nothing, and a native making (process_create, process_make,
+                process_create_shared) shall then make nothing and answer
+                SHOULD_WAIT (F-130); process_make, which builds its child in the
+                creator's job, refuses a creator at its own limit even for a child
+                meant for a job with room (fail-closed).";
             attribute :>> criterion = "A fork loop in a job limited to 8 tasks is
                 refused at exactly 8, counting the forking process, the refusal
-                counted as pids.events counts it, while a sibling job forks on.";
+                counted as pids.events counts it, while a sibling job forks on.
+                Under personality=user, syscall::region_check's case: a region's
+                processes in a job limited to 2 tasks, the third refused
+                SHOULD_WAIT with the job's count still 2, and one made again once
+                one of the two is gone; and a creator in a job limited to 2 tasks
+                makes one process, the next process_make refused SHOULD_WAIT with
+                the count still 2, and one made again once its child is gone.";
             attribute :>> parent = "H.QUOTA.1";
             attribute :>> unit = ("object::process::Process::new",
-                "object::process::Process::over_quota");
+                "object::process::Process::over_quota", "object::bare::Bare::new_within");
         }
         requirement <'L.object.82'> aTableOf4096 : ItemLowLevel {
             attribute :>> statement = "Process::new shall give the process a handle

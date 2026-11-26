@@ -17,11 +17,11 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | High (`H.*`) | 198 | 143 | 55 |
 | Low (`L.*`) | 1580 | 1300 | 280 |
 
-3603 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+3604 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 3612 |
+| Named by a low-level requirement | 3613 |
 | Accessors, covered by the requirement they serve | 1595 |
 | Check code in a product file | 133 |
 | Named by none | 1226 |
@@ -676,7 +676,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|---|
-| `L.object.81` | Process::new shall make a process counted in its job and charged one task there; when the job's task limit refuses the charge it shall be marked over quota and charge nothing. | A fork loop in a job limited to 8 tasks is refused at exactly 8, counting the forking process, the refusal counted as pids.events counts it, while a sibling job forks on. | H.QUOTA.1 | `object::process::Process::new`, `object::process::Process::over_quota` | `src/kernel/src/object/quota_check.rs::check_a_fork_bomb_meets_its_limit` | reached | reached | reached |
+| `L.object.81` | Process::new shall make a process counted in its job and charged one task there; when the job's task limit refuses the charge it shall be marked over quota and charge nothing, and a native making (process_create, process_make, process_create_shared) shall then make nothing and answer SHOULD_WAIT (F-130); process_make, which builds its child in the creator's job, refuses a creator at its own limit even for a child meant for a job with room (fail-closed). | A fork loop in a job limited to 8 tasks is refused at exactly 8, counting the forking process, the refusal counted as pids.events counts it, while a sibling job forks on. Under personality=user, syscall::region_check's case: a region's processes in a job limited to 2 tasks, the third refused SHOULD_WAIT with the job's count still 2, and one made again once one of the two is gone; and a creator in a job limited to 2 tasks makes one process, the next process_make refused SHOULD_WAIT with the count still 2, and one made again once its child is gone. | H.QUOTA.1 | `object::process::Process::new`, `object::process::Process::over_quota`, `object::bare::Bare::new_within` | `src/kernel/src/object/quota_check.rs::check_a_fork_bomb_meets_its_limit`, `src/kernel/src/syscall/region_check.rs::a_region_process_past_its_jobs_task_limit_is_refused`, `src/kernel/src/syscall/region_check.rs::a_creator_at_its_task_limit_makes_nothing` | reached | reached | reached |
 | `L.object.82` | Process::new shall give the process a handle table that holds at most HANDLE_LIMIT, 4096, handles. | Duplicating into one process's table until it is refused ends in NO_HANDLES with at most 4096 held. | H.OBJ.7 | `object::process::Process::new` | `src/kernel/src/syscall/native_check.rs::a_full_table_refuses_and_loses_nothing` | reached | reached | reached |
 | `L.object.83` | A process shall give every task it charged back to its job once, when it is reaped or dropped. | With the fork loop's processes and the process moved in gone, both jobs' task counts, and their parent's, read 0. | H.QUOTA.1, H.QUOTA.4 | `object::process::Process::uncharge_tasks`, `object::process::Process::drop` | `src/kernel/src/object/quota_check.rs::check_a_fork_bomb_meets_its_limit` | reached | reached | reached |
 | `L.object.84` | Process::charge_thread shall charge the job one task for each thread beside the first, refused at the task limit, and Process::uncharge_thread shall give it back once as the thread goes. | In a job limited to 3 tasks, a process makes 2 threads and a third is refused EAGAIN; as the threads end the job's task count falls back to 1. | H.QUOTA.1, H.QUOTA.4 | `object::process::Process::charge_thread`, `object::process::Process::uncharge_thread` | *baselined* | — | — | — |
@@ -3313,6 +3313,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/syscall/native_check.rs::an_idle_job_refuses_a_weight` | kernel | L.object.187 |
 | `src/kernel/src/syscall/native_check.rs::memory_is_scrubbed_through_its_token_alone` | kernel | L.object.252, L.syscall.24, L.mm.108 |
 | `src/kernel/src/syscall/native_check.rs::the_audit_record_is_read_by_its_handle_alone` | kernel | H.AUD.9 |
+| `src/kernel/src/syscall/region_check.rs::a_creator_at_its_task_limit_makes_nothing` | kernel | L.object.81 |
+| `src/kernel/src/syscall/region_check.rs::a_region_process_past_its_jobs_task_limit_is_refused` | kernel | L.object.81 |
 | `src/kernel/src/syscall/region_check.rs::fault_ends_the_region` | kernel | L.trap.24, L.object.282 |
 | `src/kernel/src/syscall/region_check.rs::run` | kernel | H.OBJ.25, H.OBJ.26, L.trap.14, L.trap.15, L.trap.16, L.trap.17 |
 | `src/kernel/src/syscall/region_check.rs::run` | kernel | H.TRAP.21, H.TRAP.22, H.TRAP.23, H.TRAP.24, H.OBJ.23, H.OBJ.24 |

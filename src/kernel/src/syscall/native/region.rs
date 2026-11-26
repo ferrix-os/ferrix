@@ -15,7 +15,7 @@ use ferrix_native_abi::status;
 use super::{copy_in, fault, insert_new, job_in, record_level, returned, table_error};
 use crate::arch;
 use crate::audit;
-use crate::object::bare::{self, Bare};
+use crate::object::bare::{self, Bare, Refused};
 use crate::object::job::Job;
 use crate::object::process::{Host, Process, ProcessRef};
 use crate::object::region::Region;
@@ -255,9 +255,18 @@ fn new_shared(
     region.enter().map_err(|_| status::BAD_STATE)?;
     // A failure in `new` leaves the count to give back here; past it, the host's
     // own end or drop does.
-    let Ok(host) = Bare::new(Arc::clone(bound), Arc::clone(job), Some(Arc::clone(region))) else {
-        region.leave();
-        return Err(status::NO_MEMORY);
+    // Past the job's task limit nothing is made, and the call answers as `process_create`
+    // does at the same limit (`new_process_handle`, `JobError::Limited`): F-130.
+    let host = match Bare::new_within(Arc::clone(bound), Arc::clone(job), Some(Arc::clone(region)))
+    {
+        Ok(host) => host,
+        Err(why) => {
+            region.leave();
+            return Err(match why {
+                Refused::Limited => status::SHOULD_WAIT,
+                Refused::NoMemory => status::NO_MEMORY,
+            });
+        }
     };
     let host: Arc<dyn Host> = host;
     ProcessRef::created(host).map_err(|_| status::NO_MEMORY)
