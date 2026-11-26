@@ -1,6 +1,9 @@
 //! `cargo xtask test-driver-model`: the rule "writing a driver never needs a
 //! change to the kernel" (customer, 2026-10-25), as a check
 //! (`docs/DRIVER-MODEL.md` §8; the consultant's D1 and D20, ledger 4475).
+//! It runs on a `personality=user` kernel alone (`--personality user`, or a
+//! profile that carries it), the only kernel that publishes generic nodes;
+//! a hybrid is refused by name (ledger 5896 C.2).
 //!
 //! 1. **The kernel is built once** and its ELF's sha256 recorded, before
 //!    anything of the test exists in an image.
@@ -11,7 +14,9 @@
 //!    SPI and its `apb_pclk` clock reference stay as QEMU wrote them.
 //! 3. **The image differs only where the rule allows**: its initramfs
 //!    carries `testseconds`, and `devmgr` is built with its table row for
-//!    the compatible; the tree is the edited one, given back with `-dtb` on
+//!    the compatible; beside them, pid 1 is a script that only waits
+//!    (`ferrix.init=`, busybox's `sh` and `sleep`), so the boot outlives the
+//!    driver's lines; the tree is the edited one, given back with `-dtb` on
 //!    the device-tree path (`acpi=off`). The boot carries
 //!    `ferrix.unisolated`, the unclaimed word, which is what admits an
 //!    untranslated generic node on AArch64 (G4 (c); D6 is the customer's
@@ -69,8 +74,13 @@ const CHANGE_ONE_KERNEL_BYTE: bool = false;
 /// the refusal.
 const BREAK_THE_CLOCK: bool = true;
 
-/// The boot's last line.
-const BOOTED: &str = "FERRIX-BOOT-OK";
+/// Pid 1's script: it waits, so the boot outlives the driver's lines.
+const WAIT: &str = "/etc/driver-model-wait";
+
+/// The line a `personality=user` kernel prints where a hybrid's success marker
+/// would be (BOOT-AUTHORITY.md BA.13): its first processes, devmgr among them,
+/// start after it.
+const BOOTED: &str = qemu::UNCHECKED_MARKER;
 /// How long a boot reads on after [`BOOTED`] for the lines it needs.
 const PATIENCE: Duration = Duration::from_secs(20);
 
@@ -265,13 +275,33 @@ fn test_image(arch: Arch, args: &Args, kernel: &cargo::Kernel) -> Result<(PathBu
     } else {
         cargo::Kernel::plain(kernel.elf.clone())
     };
+    // Pid 1, which outlives the match: under `personality=user` init's end is
+    // the machine's (`power::finish`), and an image with no init ends it at
+    // once, before the match interrupt two seconds on. busybox as `sh` and
+    // `sleep`, and a script `ferrix.init=` names, which only waits.
+    let busybox = std::fs::read(crate::busybox::build(arch)?)?;
+    let file = |path: &str, content: Vec<u8>| crate::ports::File {
+        path: path.to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(content),
+    };
+    let carried_files = [
+        file("bin/sh", busybox.clone()),
+        file("bin/sleep", busybox),
+        file(
+            WAIT.trim_start_matches('/'),
+            b"#!/bin/sh\nexec /bin/sleep 3600\n".to_vec(),
+        ),
+    ];
+    let mut args = args.clone();
+    args.init_path = Some(WAIT.to_owned());
     fat::keep_parts(true);
-    let cmdline = crate::arch_cmdline(arch, args);
+    let cmdline = crate::arch_cmdline(arch, &args);
     let image = fat::write_image_with(
         arch,
         &loader,
         &carried,
-        &initramfs::build(None, &natives, None, &[])?,
+        &initramfs::build(None, &natives, None, &carried_files)?,
         cmdline.as_deref(),
     )?;
     fat::keep_parts(false);
@@ -315,20 +345,18 @@ fn boot(arch: Arch, args: &Args, image: &Path, kernel: &Path, row: Row) -> Resul
     Ok(())
 }
 
-/// Set false by the landing that starts `devmgr` on a `personality=user` kernel.
-const REFUSED_UNTIL_A_USER_KERNEL_STARTS_DEVMGR: bool = true;
-
 /// The check.
 ///
 /// Verifies: H.DEV.7, L.device.64
 fn test_driver_model(args: &Args) -> Result<()> {
     // Generic publication is `personality=user`'s (`docs/microkernel/K8.md`
-    // §7), and that kernel starts no driver yet: this never goes green on a
-    // kernel that publishes nothing (ledger 5896, C.2).
-    if REFUSED_UNTIL_A_USER_KERNEL_STARTS_DEVMGR {
+    // §7): a hybrid publishes no generic node, so the row is refused there by
+    // name rather than going green on a kernel that publishes nothing (ledger
+    // 5896, C.2).
+    if crate::flags::this_run()?.value("personality") != Some("user") {
         return Err(Error::new(
-            "test-driver-model: refused until a personality=user kernel starts devmgr: \
-             generic publication is that kernel's; the landing that starts it owes this row",
+            "test-driver-model is for --personality user (or a profile that carries it): \
+             generic publication is that kernel's alone",
         ));
     }
     for arch in args.arches()? {
