@@ -426,10 +426,30 @@ const CHUNK: usize = 256;
 const CHUNKS: usize = 1024;
 
 /// The table: chunks made as they are needed, never freed.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 static TABLE: [Once<Vec<Slot>>; CHUNKS] = [const { Once::new() }; CHUNKS];
 
 /// How many chunks exist. Raised only under [`CLAIMING`].
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 static MADE: AtomicU32 = AtomicU32::new(0);
+
+/// Jobs ring 0 holds at once under `kernel_memory=retyped`: K16.9's `N_jobs`, a capacity of the
+/// profile (docs/microkernel/K16.md §3). Tonight's heaviest row held at most 31 (the bucket's upper
+/// edge, ledger 10548 Z2), so 256 is eight times it. Not under the lift: linuxd's copy of this table
+/// is its own memory, in its arena.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+pub const FIXED_JOBS: usize = 256;
+
+/// The table under `kernel_memory=retyped`, in ring 0: a static of [`FIXED_JOBS`] slots, so that
+/// nothing is made after boot, or at all (K16.9, L.object.339, H.MEM.33).
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+static FIXED: [Slot; FIXED_JOBS] = [const { Slot::new() }; FIXED_JOBS];
+
+/// The slots ring 0's table holds: [`FIXED_JOBS`], for K16.9's check.
+#[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+pub const fn fixed_slots() -> usize {
+    FIXED.len()
+}
 
 /// Where the next claim starts looking. A hint, read and written anywhere.
 static HINT: AtomicU32 = AtomicU32::new(0);
@@ -444,6 +464,9 @@ static LIVE: AtomicU64 = AtomicU64::new(0);
 /// The slot at `index`, if the table has it.
 fn slot(index: u32) -> Option<&'static Slot> {
     let index = usize::try_from(index).ok()?;
+    #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+    return FIXED.get(index);
+    #[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
     TABLE.get(index / CHUNK)?.get()?.get(index % CHUNK)
 }
 
@@ -459,6 +482,11 @@ pub fn live_slots() -> u64 {
 /// [`AllocError`] when there is no memory for a chunk, or the table is full.
 fn claim(parent: u32) -> Result<u32, AllocError> {
     let _claiming = CLAIMING.lock();
+    // Ring 0's table under `retyped` is fixed: the job past it is refused, its making answering
+    // the no-memory status it always could (K16.9, ledger 10505 C5).
+    #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+    let index = find_free().ok_or(AllocError)?;
+    #[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
     let index = match find_free() {
         Some(index) => index,
         None => grow()?,
@@ -515,6 +543,9 @@ fn claim(parent: u32) -> Result<u32, AllocError> {
 
 /// A free slot in the chunks made so far, from the hint on.
 fn find_free() -> Option<u32> {
+    #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
+    let slots = u32::try_from(FIXED_JOBS).ok()?;
+    #[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
     let slots = MADE.load(Ordering::Acquire).checked_mul(CHUNK as u32)?;
     let start = HINT.load(Ordering::Relaxed);
     (0..slots)
@@ -523,7 +554,9 @@ fn find_free() -> Option<u32> {
         .inspect(|&index| HINT.store(index.wrapping_add(1), Ordering::Relaxed))
 }
 
-/// Make the next chunk and answer its first slot. Under [`CLAIMING`].
+/// Make the next chunk and answer its first slot. Under [`CLAIMING`]. Not in ring 0 under
+/// `retyped`, whose table is fixed.
+#[cfg(not(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift"))))]
 fn grow() -> Result<u32, AllocError> {
     let made = MADE.load(Ordering::Acquire);
     let cell = TABLE.get(made as usize).ok_or(AllocError)?;
