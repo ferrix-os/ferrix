@@ -263,12 +263,35 @@ fn carry_out(local: &Endpoint, kernel: Handle, gone: &AtomicBool) {
 fn spawn_out(local: Arc<Port>, kernel: Handle) {
     spawn_with("port out", (local, kernel), |(local, kernel)| {
         let port = core::mem::ManuallyDrop::new(owned(KernelPort::from_owned, kernel));
+        // Bells dropped on a full driver port, this bridge's: said at the first and at each
+        // power of two, so that a row reads the count and a port that stays full is no flood.
+        let mut dropped: u64 = 0;
         loop {
             let _ = local.waiters().wait_trusting(|| !local.is_empty());
             while let Some(packet) = local.take() {
-                if let Err(why) = port.queue(packet.key, packet.data) {
-                    crate::println!("  bridge   a bell refused: {why:?}");
-                    return;
+                match port.queue(packet.key, packet.data) {
+                    Ok(()) => {}
+                    // The driver's port is full (`port_queue`'s SHOULD_WAIT for
+                    // `PortError::Full`): its waiter has packets to wake on, and on every wake
+                    // a driver looks at each of its rings before it waits again, so this bell
+                    // adds nothing (M5-LIFT §11). Dropped, as the hybrid kernel's own rings
+                    // drop it. Ending here instead left every later bell in the local port,
+                    // and a driver that slept waiting for one was never rung again (BACKLOG
+                    // 603, F-126).
+                    Err(ferrix_native::error::Error::ShouldWait) => {
+                        dropped = dropped.saturating_add(1);
+                        if dropped.is_power_of_two() {
+                            crate::println!(
+                                "  bridge   bells dropped on a full driver port: {dropped}"
+                            );
+                        }
+                    }
+                    Err(why) => {
+                        crate::println!(
+                            "  bridge   a bell refused: {why:?}, after {dropped} dropped on a full port"
+                        );
+                        return;
+                    }
                 }
             }
         }
