@@ -1156,7 +1156,7 @@ package FerrixObjectRequirements {
             attribute :>> criterion = "At stage 9 a job beneath a reserved one and
                 a job with a child are each refused a reservation.";
             attribute :>> parent = "H.QUOTA.17";
-            attribute :>> unit = ("object::quota::Quota::set_reservation", "object::job::Job::set_reservation");
+            attribute :>> unit = ("object::quota::Quota::set_reservation", "object::job::Job::set_kernel_reservation");
         }
         requirement <'L.object.223'> aReservationIsBesideItsLimit : ItemLowLevel {
             attribute :>> statement = "A job's reservation shall never exceed its
@@ -4218,6 +4218,17 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.MEM.32";
             attribute :>> unit = "discovery::devmgr::drivers_job";
             attribute :>> scope = "kernel_memory=retyped";
+        }
+        requirement <'L.object.350'> aKernelPromiseIsNotChangedByACall : ItemLowLevel {
+            attribute :>> statement = "A reservation the kernel made at boot shall not be changed through a call.";
+            attribute :>> criterion = "Every checked boot: object::reserve_check, a reservation the kernel made refused a
+                call's growth and shrinking as a rule, its size unmoved; syscall::native_check, job_set_limit with
+                JOB_RESERVE through a handle with RESERVE refused BAD_STATE to grow and to shrink a job the kernel
+                reserved, its size read back unmoved, while a reservation made through the call is still grown and
+                shrunk by it. Its control, the mark's test removed, FIRED (F-128).";
+            attribute :>> parent = "H.QUOTA.17";
+            attribute :>> unit = ("object::quota::Quota::set_reservation", "object::job::Job::set_reservation_by_call",
+                "object::job::Job::set_reservation_as", "syscall::native::job_reserve");
         }
         requirement <'L.object.346'> aFurtherPartitionHoldsItsRow : ItemLowLevel {
             attribute :>> statement = "A further Linux partition shall be started in a job and a region of its own with the

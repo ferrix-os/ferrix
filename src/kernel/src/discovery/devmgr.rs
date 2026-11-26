@@ -1451,7 +1451,7 @@ fn drivers_job() -> Result<Arc<Job>, &'static str> {
     // K16 §4: the drivers' kernel objects are theirs (`docs/microkernel/K16.md`).
     #[cfg(ferrix_kernel_memory = "retyped")]
     {
-        job.set_reservation(DRIVERS_RESERVATION)
+        job.set_kernel_reservation(DRIVERS_RESERVATION)
             .map_err(|_| "no reservation for the drivers' job")?;
         let _ = DRIVERS_PROMISED.fetch_add(1, Ordering::AcqRel);
     }

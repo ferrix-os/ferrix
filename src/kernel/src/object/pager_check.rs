@@ -637,7 +637,7 @@ fn case_o_the_faulting_job_pays(world: &World, report: &mut Report) -> Result<()
         .new_child()
         .map_err(|_| "a job refused a child")?;
     reserved
-        .set_reservation(64 * PAGE_SIZE)
+        .set_kernel_reservation(64 * PAGE_SIZE)
         .map_err(|_| "o: a reservation was refused")?;
     let served = Served::new(0, 0)?;
     let other = Served::new(0, 0)?;

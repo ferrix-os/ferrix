@@ -327,6 +327,10 @@ struct Slot {
     /// Whether [`Slot::reservation`] is its own, bound by its job and let go
     /// as it is freed.
     reserves: AtomicBool,
+    /// Whether the kernel made its own reservation (`L.object.350`): set by
+    /// the kernel's entry, [`Maker::Kernel`], at the first reservation, and
+    /// read by a call's, which may then neither grow nor shrink it.
+    kernel_made: AtomicBool,
     /// How many jobs strictly beneath it hold a reservation of their own: a
     /// slot with any is an ancestor of a reserved job, and may carry no
     /// memory limit or `memory.high` (`L.object.223`).
@@ -367,6 +371,7 @@ impl Slot {
             budget: AtomicU64::new(0),
             reservation: AtomicU8::new(crate::mm::NO_RESERVATION),
             reserves: AtomicBool::new(false),
+            kernel_made: AtomicBool::new(false),
             reserved_below: AtomicU32::new(0),
             reserve_refused: AtomicU64::new(0),
         }
@@ -502,6 +507,7 @@ fn claim(parent: u32) -> Result<u32, AllocError> {
         .reservation
         .store(reservation_of(parent), Ordering::Relaxed);
     taken.reserves.store(false, Ordering::Relaxed);
+    taken.kernel_made.store(false, Ordering::Relaxed);
     taken.reserved_below.store(0, Ordering::Relaxed);
     taken.reserve_refused.store(0, Ordering::Relaxed);
     if parent != NONE {
@@ -593,6 +599,18 @@ pub(crate) fn reservation_of(index: u32) -> crate::mm::Reservation {
 /// constrain, so that a limit and a reservation set at once cannot each pass
 /// the other's test.
 static RESERVING: SpinLock<()> = SpinLock::new(());
+
+/// Who asks for a reservation: what [`Quota::set_reservation`] may change
+/// depends on it (`L.object.350`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Maker {
+    /// The kernel itself, deciding a promise at boot: what it makes is
+    /// marked as the kernel's, and the kernel may size it again.
+    Kernel,
+    /// A call (`job_set_limit` with `JOB_RESERVE`): it may not change a
+    /// reservation the kernel made.
+    Call,
+}
 
 /// Why a reservation was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1321,11 +1339,13 @@ impl Quota {
     /// with no reservation above or beneath it and no memory limit or
     /// `memory.high` above it, and never above its own memory limit. Growing
     /// it is admitted against the free frames (`mm::reservation_resize`).
+    /// One the kernel made is not changed through a call, grown or shrunk
+    /// (`L.object.350`, F-128): [`ReserveError::Rule`].
     ///
     /// # Errors
     ///
     /// [`ReserveError`], with nothing changed.
-    pub(crate) fn set_reservation(&self, bytes: u64) -> Result<(), ReserveError> {
+    pub(crate) fn set_reservation(&self, bytes: u64, by: Maker) -> Result<(), ReserveError> {
         let slot = slot(self.index).ok_or(ReserveError::Rule)?;
         let frames = bytes / FRAME_BYTES;
         let _rules = RESERVING.lock();
@@ -1336,6 +1356,9 @@ impl Quota {
             return Err(ReserveError::Rule);
         }
         if slot.reserves.load(Ordering::Acquire) {
+            if by == Maker::Call && slot.kernel_made.load(Ordering::Acquire) {
+                return Err(ReserveError::Rule);
+            }
             let entry = slot.reservation.load(Ordering::Acquire);
             return crate::mm::reservation_resize(entry, frames)
                 .map_err(|short| self.refused(short));
@@ -1367,6 +1390,8 @@ impl Quota {
             return Err(self.refused(short));
         }
         slot.reservation.store(entry, Ordering::Release);
+        slot.kernel_made
+            .store(by == Maker::Kernel, Ordering::Release);
         slot.reserves.store(true, Ordering::Release);
         above(slot.parent.load(Ordering::Acquire), |above| {
             let _ = above.reserved_below.fetch_add(1, Ordering::AcqRel);

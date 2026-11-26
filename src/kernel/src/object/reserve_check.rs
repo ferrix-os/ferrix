@@ -40,7 +40,7 @@ fn a_rebound_reservation_is_whole(entry: mm::Reservation) -> Result<(), &'static
     }
     let tree = Job::new_root().map_err(|_| "no memory for a job")?;
     let job = tree.new_child().map_err(|_| "no memory for a job")?;
-    job.set_reservation(SMALL * PAGE_SIZE)
+    job.set_kernel_reservation(SMALL * PAGE_SIZE)
         .map_err(|_| "a small reservation was refused")?;
     if job.draws_from() != entry {
         return Err("a reservation did not take the entry a gone job's heap left");
@@ -178,7 +178,7 @@ fn check_the_rules(
         return Err("a memory limit was refused on a job with no reservation");
     }
     rule(
-        reserved.set_reservation(bytes) == Err(ReserveError::Rule),
+        reserved.set_kernel_reservation(bytes) == Err(ReserveError::Rule),
         "a reservation above the job's own limit was admitted",
         report,
     )?;
@@ -190,7 +190,7 @@ fn check_the_rules(
         return Err("a memory limit was refused on a tree with no reservation");
     }
     rule(
-        reserved.set_reservation(bytes) == Err(ReserveError::Rule),
+        reserved.set_kernel_reservation(bytes) == Err(ReserveError::Rule),
         "a reservation under a memory limit was admitted",
         report,
     )?;
@@ -198,7 +198,7 @@ fn check_the_rules(
         return Err("a limit or mark could not be set on a tree with no reservation");
     }
     rule(
-        reserved.set_reservation(bytes) == Err(ReserveError::Rule),
+        reserved.set_kernel_reservation(bytes) == Err(ReserveError::Rule),
         "a reservation under a memory.high mark was admitted",
         report,
     )?;
@@ -210,7 +210,7 @@ fn check_the_rules(
         return Err("a job drew from a reservation before it had one");
     }
     reserved
-        .set_reservation(bytes)
+        .set_kernel_reservation(bytes)
         .map_err(|_| "a reservation the free frames cover was refused")?;
     let entry = reserved.draws_from();
     if entry == mm::NO_RESERVATION {
@@ -223,13 +223,14 @@ fn check_the_rules(
     {
         return Err("a reservation did not read back as admitted");
     }
+    a_kernel_promise_is_not_changed_by_a_call(reserved, bytes, report)?;
     // A sub-job draws from it, and holds none of its own.
     let beneath = reserved.new_child().map_err(|_| "no memory for a job")?;
     if beneath.draws_from() != entry {
         return Err("a job made beneath a reserved one drew from another reservation");
     }
     rule(
-        beneath.set_reservation(bytes) == Err(ReserveError::Rule),
+        beneath.set_kernel_reservation(bytes) == Err(ReserveError::Rule),
         "a reservation beneath a reserved job was admitted",
         report,
     )?;
@@ -258,7 +259,7 @@ fn check_the_rules(
     let parent = sibling.new_child().map_err(|_| "no memory for a job")?;
     let _child = parent.new_child().map_err(|_| "no memory for a job")?;
     rule(
-        parent.set_reservation(bytes) == Err(ReserveError::Rule),
+        parent.set_kernel_reservation(bytes) == Err(ReserveError::Rule),
         "a job with a child was reserved for the first time",
         report,
     )?;
@@ -270,6 +271,32 @@ fn check_the_rules(
     )?;
     if !beneath.admits_work_from(reserved) || !sibling.admits_work_from(reserved) {
         return Err("work from inside a reserved subtree, or into an unreserved job, was refused");
+    }
+    Ok(())
+}
+
+/// A reservation the kernel made (`reserved`'s, by [`Job::set_kernel_reservation`]) is
+/// neither grown nor shrunk through a call's entry, each refused as a rule with
+/// its size unmoved (`L.object.350`, F-128).
+///
+/// Verifies: L.object.350
+fn a_kernel_promise_is_not_changed_by_a_call(
+    reserved: &Arc<Job>,
+    bytes: u64,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    rule(
+        reserved.set_reservation_by_call(2 * bytes) == Err(ReserveError::Rule),
+        "a call grew a reservation the kernel made",
+        report,
+    )?;
+    rule(
+        reserved.set_reservation_by_call(bytes - PAGE_SIZE) == Err(ReserveError::Rule),
+        "a call shrank a reservation the kernel made",
+        report,
+    )?;
+    if reserved.reservation().map(|usage| usage.limit) != Some(bytes) {
+        return Err("a refused call changed a reservation the kernel made");
     }
     Ok(())
 }

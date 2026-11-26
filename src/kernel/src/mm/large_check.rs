@@ -311,7 +311,7 @@ fn measure(me: u64, report: &mut LargeReport) -> Result<(), &'static str> {
 fn scoped(me: u64) -> Result<(), &'static str> {
     let tree = crate::object::job::Job::new_root().map_err(|_| "no memory for a job")?;
     let job = tree.new_child().map_err(|_| "no memory for a job")?;
-    job.set_reservation(SCOPE_FRAMES * PAGE_SIZE)
+    job.set_kernel_reservation(SCOPE_FRAMES * PAGE_SIZE)
         .map_err(|_| "the large path's reservation was refused")?;
     let entry = job.draws_from();
     if entry == super::NO_RESERVATION {

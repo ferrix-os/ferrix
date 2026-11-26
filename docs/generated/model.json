@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "6eacd59ae78dbe27fe2282e81145e9360c08473fc3ca8cf21997999238fc1386",
+  "digest": "6c02cf25d7b808b88523a2c417fc92e3b2a8365535bd85c4fa4f2970b2cff071",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -113,7 +113,7 @@
   ],
   "summary": {
     "packages": 168,
-    "elements": 10616,
+    "elements": 10621,
     "maturity": {
       "implemented": 296,
       "inProgress": 23,
@@ -34437,7 +34437,7 @@
                   "qualifiedName": "FerrixObjectRequirements::JobReservations::aReservationIsOneLevel",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"object::quota::Quota::set_reservation\", \"object::job::Job::set_reservation\")",
+                  "value": "(\"object::quota::Quota::set_reservation\", \"object::job::Job::set_kernel_reservation\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 1159
@@ -47621,6 +47621,63 @@
               ]
             },
             {
+              "name": "aKernelPromiseIsNotChangedByACall",
+              "qualifiedName": "FerrixObjectRequirements::Pagers::aKernelPromiseIsNotChangedByACall",
+              "kind": "requirement",
+              "shortName": "L.object.350",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 4222
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aKernelPromiseIsNotChangedByACall",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A reservation the kernel made at boot shall not be changed through a call.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4223
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aKernelPromiseIsNotChangedByACall",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Every checked boot: object::reserve_check, a reservation the kernel made refused a call's growth and shrinking as a rule, its size unmoved; syscall::native_check, job_set_limit with JOB_RESERVE through a handle with RESERVE refused BAD_STATE to grow and to shrink a job the kernel reserved, its size read back unmoved, while a reservation made through the call is still grown and shrunk by it. Its control, the mark's test removed, FIRED (F-128).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4228
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aKernelPromiseIsNotChangedByACall",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.QUOTA.17\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4229
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::Pagers::aKernelPromiseIsNotChangedByACall",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"object::quota::Quota::set_reservation\", \"object::job::Job::set_reservation_by_call\", \"object::job::Job::set_reservation_as\", \"syscall::native::job_reserve\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 4231
+                  }
+                }
+              ]
+            },
+            {
               "name": "aFurtherPartitionHoldsItsRow",
               "qualifiedName": "FerrixObjectRequirements::Pagers::aFurtherPartitionHoldsItsRow",
               "kind": "requirement",
@@ -47628,7 +47685,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4222
+                "line": 4233
               },
               "children": [
                 {
@@ -47639,7 +47696,7 @@
                   "value": "\"A further Linux partition shall be started in a job and a region of its own with the FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4224
+                    "line": 4235
                   }
                 },
                 {
@@ -47650,7 +47707,7 @@
                   "value": "\"test-partitions: a second partition runs programs and ends, and one that dies at once, the first going on; Rows::judge at its start; the first's end ends the machine, shown.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4226
+                    "line": 4237
                   }
                 },
                 {
@@ -47661,7 +47718,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4227
+                    "line": 4238
                   }
                 },
                 {
@@ -47672,7 +47729,7 @@
                   "value": "\"linuxd_start::start_further\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4228
+                    "line": 4239
                   }
                 }
               ]
@@ -47685,7 +47742,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4230
+                "line": 4241
               },
               "children": [
                 {
@@ -47696,7 +47753,7 @@
                   "value": "\"With more than one Linux partition, each shall be a speculation domain of its own.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4231
+                    "line": 4242
                   }
                 },
                 {
@@ -47707,7 +47764,7 @@
                   "value": "\"test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4232
+                    "line": 4243
                   }
                 },
                 {
@@ -47718,7 +47775,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4233
+                    "line": 4244
                   }
                 },
                 {
@@ -47729,7 +47786,7 @@
                   "value": "\"linuxd_start::start\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4234
+                    "line": 4245
                   }
                 }
               ]
@@ -47742,7 +47799,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4236
+                "line": 4247
               },
               "children": [
                 {
@@ -47753,7 +47810,7 @@
                   "value": "\"A kernel-heap charge refused at a job's memory limit, made for the running task's own job where it may block and not inside a reclaim, shall first reclaim clean cache charged to the job whose limit is full or beneath it and then be tried once more. In linuxd (the lift) such a charge shall be refused without a reclaim, as before: the lift's may_block answers yes whatever is held, so the charge could not tell a context holding a spin lock from one holding none.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4243
+                    "line": 4254
                   }
                 },
                 {
@@ -47764,7 +47821,7 @@
                   "value": "\"test-container's heap-reclaim step: at memory.max beside the cgroup's file cache, 128 opens of memory.events held and a read given, pgscan moving, and the file's own mapping reading as before once its pages were taken down and filled again; with the reclaim taken out the step fails on its refusal sentence (mki3f-c1, FIRED).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4248
+                    "line": 4259
                   }
                 },
                 {
@@ -47775,7 +47832,7 @@
                   "value": "\"H.QUOTA.7\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4249
+                    "line": 4260
                   }
                 },
                 {
@@ -47786,7 +47843,7 @@
                   "value": "(\"object::quota::KernelHeap::charge\", \"object::oom::reclaim_within\", \"sched::heap_charge_may_reclaim\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4251
+                    "line": 4262
                   }
                 }
               ]
@@ -47799,7 +47856,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4253
+                "line": 4264
               },
               "children": [
                 {
@@ -47810,7 +47867,7 @@
                   "value": "\"A reclaim begun inside a reclaim of the same task shall stop the machine (FX-0973).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4255
+                    "line": 4266
                   }
                 },
                 {
@@ -47821,7 +47878,7 @@
                   "value": "\"With KernelHeap's guard taken out and a refused charge planted at the head of the reclaim, test-container stops as FX-0973, 'a reclaim began inside a reclaim' (mki3f-c2, FIRED).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4258
+                    "line": 4269
                   }
                 },
                 {
@@ -47832,7 +47889,7 @@
                   "value": "\"H.QUOTA.7\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4259
+                    "line": 4270
                   }
                 },
                 {
@@ -47843,7 +47900,7 @@
                   "value": "\"user::cache::reclaim\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4260
+                    "line": 4271
                   }
                 }
               ]

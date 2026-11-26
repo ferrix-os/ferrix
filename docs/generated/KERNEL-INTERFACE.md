@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-3139 declarations in the core's files, 218 in the item's; 280 checks-only.
+3140 declarations in the core's files, 218 in the item's; 280 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2463,12 +2463,13 @@ checks above is `pub` for raised checks (F3).
 | `Job::set_cpu_idle` | method | load |  |
 | `Job::set_cpu_weight` | method | item, load |  |
 | `Job::set_freeze` | method | item, load |  |
+| `Job::set_kernel_reservation` | method | item, load |  |
 | `Job::set_limit` | method | item, load |  |
 | `Job::set_mark` | method | item, load |  |
 | `Job::set_max_depth` | method | load |  |
 | `Job::set_max_descendants` | method | load |  |
 | `Job::set_node` | method | load |  |
-| `Job::set_reservation` | method | item, load |  |
+| `Job::set_reservation_by_call` | method | item |  |
 | `Job::signals` | method | item, load, bin |  |
 | `Job::subtree` | method | load |  |
 | `Job::subtree_control` | method | load |  |

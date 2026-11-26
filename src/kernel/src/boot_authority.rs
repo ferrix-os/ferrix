@@ -154,7 +154,9 @@ pub(crate) fn seal() {
     let (Some(pool), Some(promised), Some(bare)) = (pool, promised, bare) else {
         fatal!(catalog::FIRST_PROCESSES, "no jobs for the seal");
     };
-    if pool.set_reservation(KERNEL_POOL).is_err() || promised.set_reservation(PROBE).is_err() {
+    if pool.set_kernel_reservation(KERNEL_POOL).is_err()
+        || promised.set_kernel_reservation(PROBE).is_err()
+    {
         fatal!(catalog::FIRST_PROCESSES, "no promise for the kernel pool");
     }
     crate::mm::seal::seal_after_boot(pool.draws_from());
@@ -217,7 +219,7 @@ fn make(creator: Option<&dyn Host>, _name: &[u8]) -> Result<Arc<dyn Host>, Errno
             let job = job::root().new_child().map_err(|_| status::NO_MEMORY)?;
             job.make_measured();
             #[cfg(ferrix_kernel_memory = "retyped")]
-            job.set_reservation(16 << 20)
+            job.set_kernel_reservation(16 << 20)
                 .map_err(|_| status::NO_MEMORY)?;
             job
         }
@@ -361,7 +363,7 @@ fn promise_for_partitions(job: &job::Job, parsed: &Description<'_>) -> Result<()
             bytes += partition.reserve_pages().saturating_mul(PAGE_SIZE);
         }
     }
-    job.set_reservation(bytes)
+    job.set_kernel_reservation(bytes)
         .map_err(|_| "no promise for the partitions")
 }
 

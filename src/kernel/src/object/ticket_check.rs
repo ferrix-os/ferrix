@@ -646,7 +646,7 @@ fn check_a_reserved_client(world: &World) -> Result<(), &'static str> {
         .new_child()
         .map_err(|_| "a job refused a child")?;
     // 65: a size of this case's own, so a control can key on it (ledger 6681).
-    job.set_reservation(65 * PAGE_SIZE)
+    job.set_kernel_reservation(65 * PAGE_SIZE)
         .map_err(|_| "a reservation for a ticket's client was refused")?;
     let client = Side::new()?;
     client

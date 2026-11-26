@@ -115,6 +115,7 @@ fn checks(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     a_processor_leaves_service_through_its_token_alone(side, report)?;
     memory_is_scrubbed_through_its_token_alone(side, report)?;
     a_reservation_needs_reserve(side, report)?;
+    a_kernel_promise_is_not_changed_through_the_call(side, report)?;
     Ok(())
 }
 
@@ -1354,6 +1355,65 @@ fn memory_is_scrubbed_through_its_token_alone(
         }
         _ => Err("memory_scrub answered neither a batch nor the scrubber's stand-down"),
     }
+}
+
+/// A reservation the kernel made is not changed through the call (F-128): on a
+/// job the kernel reserved, `job_set_limit` with `JOB_RESERVE` through a
+/// handle with `RESERVE`, as devmgr holds `drivers.slice`, refused `BAD_STATE`
+/// to grow it and to shrink it, its size read back unmoved; on a job reserved
+/// through the call, the same call grows it and shrinks it back as before.
+///
+/// Verifies: L.object.350
+fn a_kernel_promise_is_not_changed_through_the_call(
+    side: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    use ferrix_native_abi::types::JOB_RESERVE;
+    let pages = 4 * PAGE_SIZE;
+    let tree = Job::new_root().map_err(|_| "no memory for a job")?;
+    let kernels = tree.new_child().map_err(|_| "no memory for a job")?;
+    kernels
+        .set_kernel_reservation(pages)
+        .map_err(|_| "the kernel's reservation of the case was refused")?;
+    let callers = tree.new_child().map_err(|_| "no memory for a job")?;
+    let [kernel_made, called] = [&kernels, &callers].map(|job| {
+        side.process.with_handles(|table| {
+            table.insert(Object::Job(Arc::clone(job)), Rights::JOB | Rights::RESERVE)
+        })
+    });
+    let (Ok(kernel_made), Ok(called)) = (kernel_made, called) else {
+        return Err("no room for a job");
+    };
+    refused(
+        set_limit(side, kernel_made, JOB_RESERVE, 2 * pages),
+        status::BAD_STATE,
+        "a call grew a promise the kernel made",
+        report,
+    )?;
+    refused(
+        set_limit(side, kernel_made, JOB_RESERVE, pages - PAGE_SIZE),
+        status::BAD_STATE,
+        "a call shrank a promise the kernel made",
+        report,
+    )?;
+    let [size, _, _] = quota(side, kernel_made, JOB_RESERVE)?;
+    if size != pages {
+        return Err("a refused call moved a promise the kernel made");
+    }
+    for bytes in [pages, 2 * pages, pages] {
+        let _ = set_limit(side, called, JOB_RESERVE, bytes)
+            .map_err(|_| "a call could not size a reservation it made")?;
+    }
+    let [size, _, _] = quota(side, called, JOB_RESERVE)?;
+    if size != pages {
+        return Err("a reservation made through the call did not read back as sized");
+    }
+    for handle in [kernel_made, called] {
+        let _ = side
+            .call(nr::HANDLE_CLOSE, &[reg(handle)])
+            .map_err(|_| "could not close a job handle")?;
+    }
+    Ok(())
 }
 
 /// A job's reservation through the calls (`docs/microkernel/K12.md` §2.6,

@@ -151,7 +151,7 @@ fn promise_for_partition(partition: &job::Job) -> Result<(u64, u64), &'static st
     // rows have been promised by their own starts, above.
     let mut promised = crate::mm::free_frames();
     while let Err(quota::ReserveError::Short(short)) =
-        partition.set_reservation(promised * PAGE_SIZE)
+        partition.set_kernel_reservation(promised * PAGE_SIZE)
     {
         // `Short` names a shortfall of at least a frame, or this would not end: a zero
         // is refused here rather than spun on at boot.
@@ -163,7 +163,7 @@ fn promise_for_partition(partition: &job::Job) -> Result<(u64, u64), &'static st
     let admitted = promised;
     promised = promised / 8 * 7;
     partition
-        .set_reservation(promised * PAGE_SIZE)
+        .set_kernel_reservation(promised * PAGE_SIZE)
         .map_err(|why| {
             println!("  linuxd   no reservation of {promised} frames: {why:?}");
             "no reservation for the partition"
@@ -507,7 +507,7 @@ fn start_further(
     // K16 §4: this partition's memory is a promise, as the first's is.
     #[cfg(ferrix_kernel_memory = "retyped")]
     partition
-        .set_reservation(row.frames * PAGE_SIZE)
+        .set_kernel_reservation(row.frames * PAGE_SIZE)
         .map_err(|why| {
             println!("  linuxd {index} no reservation: {why:?}");
             "no reservation for it"

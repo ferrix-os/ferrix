@@ -2761,8 +2761,9 @@ fn job_set_limit(process: &Process, job: Handle, resource: u64, at: u64) -> Resu
 
 /// `job_set_limit` with `JOB_RESERVE`: the job's reservation, in whole
 /// pages, on a handle with [`Rights::RESERVE`] (`L.object.221`). Refused
-/// `BAD_STATE` by a rule of `docs/microkernel/K12.md` §2.6, `LIMIT_REACHED`
-/// with every reservation bound, and `NO_MEMORY` when the free frames do not
+/// `BAD_STATE` by a rule of `docs/microkernel/K12.md` §2.6 or on a
+/// reservation the kernel made (`L.object.350`), `LIMIT_REACHED` with every
+/// reservation bound, and `NO_MEMORY` when the free frames do not
 /// cover it; each with nothing changed.
 fn job_reserve(process: &Process, job: Handle, at: u64) -> Result<usize, Errno> {
     let job = job_in(process, job, Rights::RESERVE)?;
@@ -2771,7 +2772,7 @@ fn job_reserve(process: &Process, job: Handle, at: u64) -> Result<usize, Errno> 
         return Err(status::INVALID_ARGS);
     }
     let bytes = bytes - bytes % PAGE_SIZE;
-    match job.set_reservation(bytes) {
+    match job.set_reservation_by_call(bytes) {
         Ok(()) => {
             audit::limit_set(
                 audit::LIMIT_SET,

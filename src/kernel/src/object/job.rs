@@ -799,16 +799,37 @@ impl Job {
     /// free frames is answered, so clean cache is not taken for memory in
     /// use (ledger 2550 (5)).
     ///
+    /// The kernel's own entry: a reservation made here is the kernel's
+    /// promise, marked so that no call changes it (`L.object.350`); every
+    /// promise the kernel makes at boot comes through here.
+    ///
     /// # Errors
     ///
     /// [`quota::ReserveError`], with nothing changed; the tree's root takes
     /// none.
-    pub fn set_reservation(&self, bytes: u64) -> Result<(), quota::ReserveError> {
+    pub fn set_kernel_reservation(&self, bytes: u64) -> Result<(), quota::ReserveError> {
+        self.set_reservation_as(bytes, quota::Maker::Kernel)
+    }
+
+    /// [`Job::set_kernel_reservation`] for a call (`job_set_limit` with
+    /// `JOB_RESERVE`): a reservation the kernel made is not changed through
+    /// it, grown or shrunk (`L.object.350`, F-128).
+    ///
+    /// # Errors
+    ///
+    /// As [`Job::set_kernel_reservation`], and [`quota::ReserveError::Rule`] on a
+    /// reservation the kernel made.
+    pub fn set_reservation_by_call(&self, bytes: u64) -> Result<(), quota::ReserveError> {
+        self.set_reservation_as(bytes, quota::Maker::Call)
+    }
+
+    /// Make its reservation `bytes` for `by`, with one reclaim of a shortfall.
+    fn set_reservation_as(&self, bytes: u64, by: quota::Maker) -> Result<(), quota::ReserveError> {
         let quota = self.quota.as_ref().ok_or(quota::ReserveError::Rule)?;
-        match quota.set_reservation(bytes) {
+        match quota.set_reservation(bytes, by) {
             Err(quota::ReserveError::Short(short)) => {
                 let _ = crate::user::cache::reclaim(quota::NONE, short);
-                quota.set_reservation(bytes)
+                quota.set_reservation(bytes, by)
             }
             done => done,
         }

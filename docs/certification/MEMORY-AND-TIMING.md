@@ -555,7 +555,7 @@ beyond `O`.
   reservations never exceeds the managed frames less the watermark, and
   only frames free at that moment are promised. Before a refusal, one
   machine-wide reclaim of the shortfall runs with no lock held, and the
-  test is taken again (`Job::set_reservation`); its bound is the reclaim's, two
+  test is taken again (`Job::set_kernel_reservation`); its bound is the reclaim's, two
   passes round the list of file objects, above.
 * **What each hold K12 adds costs** (ledger 2783 (3)): a take or a free of
   `2^order` frames reads or writes one tag a frame, `2^order` tag
