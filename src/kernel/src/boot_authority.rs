@@ -461,9 +461,11 @@ fn try_start_manager() -> Result<Option<Served>, &'static str> {
     let parsed = Description::parse(&bytes).map_err(|_| "the description is malformed")?;
     // Ring 0's tables are fixed under `retyped` (K16.9): the description's `max_processes` is a
     // limit of at most their size, set before the manager runs; one larger stops the boot
-    // (FX-0953), one below the tasks alive too.
+    // (FX-0980), one below the tasks alive too.
     #[cfg(all(ferrix_kernel_memory = "retyped", not(ferrix_load_built = "lift")))]
-    process::limit_processes(parsed.max_processes())?;
+    if let Err(why) = process::limit_processes(parsed.max_processes()) {
+        fatal!(catalog::RING_ZERO_TABLES, "first processes: {why}");
+    }
     let mut transfers = Vec::new();
     fallible::try_reserve(&mut transfers, CHANNEL_MAX_HANDLES).map_err(|_| "no memory")?;
     let job = job::root()

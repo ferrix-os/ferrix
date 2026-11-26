@@ -145,6 +145,7 @@ Causes are listed most likely first.
 | [FX-0977](#fx-0977) | a kept resident count would go wrong |
 | [FX-0978](#fx-0978) | a kept page-cache count would go wrong |
 | [FX-0979](#fx-0979) | an anonymous mapping made beside another was not as required |
+| [FX-0980](#fx-0980) | the description's max_processes does not fit ring 0's tables |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -3490,6 +3491,24 @@ resident counts other than a recount.
 
 See: src/kernel/src/user/space.rs AddressSpace::place_beside;
 src/kernel/src/user/vmo.rs Vmo::join_window; docs/ANON-MERGE.md.
+
+<a id="fx-0980"></a>
+
+## FX-0980 — the description's max_processes does not fit ring 0's tables
+
+Under `kernel_memory=retyped` ring 0's pid table is a static of `FIXED_TASKS`
+entries, never grown (`L.object.339`). The description's `max_processes` limits
+it, `TASKS_PER_PROCESS` tasks each; a limit past the table, or below the tasks
+already alive, cannot be kept, so the boot stops before the manager runs.
+
+1. The description asks for more processes than `FIXED_TASKS /
+   TASKS_PER_PROCESS`: `check-partitions.py` refuses it at build, so the image
+   was not built by the tree's xtask.
+2. A second limit was set, or more tasks were alive before the manager than the
+   limit.
+
+See: src/kernel/src/object/process.rs limit_processes; docs/microkernel/K16.md
+§3.
 
 <a id="fx-1001"></a>
 

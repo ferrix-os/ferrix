@@ -4167,12 +4167,14 @@ package FerrixObjectRequirements {
                 the quota table filled through their real calls until refused, then one given back taken again;
                 the address waits' bound is unreachable while waiters are tasks. Statically, check-kernel-shape
                 holds user::address_wait::grow built under heap alone and object::process::fixed_entries under
-                retyped alone, its plants FIRED. The description above the size stops the boot (FX-0953), its
-                control FIRED. The seal's own read of the tables is B's line, a BACKLOG row.";
+                retyped alone, its plants FIRED. The description above the size is refused by check-partitions
+                at build and stops the boot (FX-0980), each control FIRED. user::address_wait_check's
+                compared sequence sees the one bucket as the heap's 256 under both memory models. The seal's own read of the tables is B's line, a BACKLOG row.";
             attribute :>> parent = "H.MEM.33";
             attribute :>> unit = ("object::process::put", "object::process::limit_processes",
                 "object::process::Live::index", "object::process::Live::get", "object::process::Live::get_mut",
-                "object::process::Live::remove", "object::process::Live::iter", "object::quota::find_free",
+                "object::process::Live::remove", "object::process::Live::iter", "object::process::fixed_entries",
+                "object::quota::find_free",
                 "user::address_wait::push_within", "user::address_wait::take_at",
                 "user::address_wait::Bucket::get", "user::address_wait::Bucket::iter_mut");
             attribute :>> scope = "kernel_memory=retyped";

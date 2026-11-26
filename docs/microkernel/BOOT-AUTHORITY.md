@@ -155,7 +155,7 @@ that is not the image's; a device twice; a device the TOML's board has none of; 
 board's memory; a `max_processes` over what ring 0's pid table holds under `kernel_memory=retyped`
 (`FIXED_TASKS / TASKS_PER_PROCESS`, 64 tonight, read from the kernel's source; K16.9, ledger 10548 Z4), under
 every flag so that one description boots both memory models. Every description in the tree leaves it at zero,
-the kernel's own, and the kernel refuses one over it again at boot (FX-0953). T2 / TQL-5 for the checker, T3 is not claimed for the generator. The description is
+the kernel's own, and the kernel refuses one over it again at boot (FX-0980). T2 / TQL-5 for the checker, T3 is not claimed for the generator. The description is
 security-policy data: `A.ADMIN` in the Security Target. The checker runs on the bytes in the built image, the build fails without it,
 every refusal has a FIRED control, a TOOLS.md row at T2 / TQL-5; "written apart" means separate code, not F-27 independence (BA.11).
 

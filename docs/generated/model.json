@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "06887aeeda8ebd36e66f2f96f11c84db8a9cb935ac865ccca2228a8d4da14e6d",
+  "digest": "6bbe9aac87a78ee964070e91f8993ba8e741c0476c1d3aa4bd9bbb58bf3516b0",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -47169,10 +47169,10 @@
                   "qualifiedName": "FerrixObjectRequirements::Pagers::ringZerosTablesAreTheirBootSize",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"object::rehome_check's boot-size case: each table its size, the pid table and the quota table filled through their real calls until refused, then one given back taken again; the address waits' bound is unreachable while waiters are tasks. Statically, check-kernel-shape holds user::address_wait::grow built under heap alone and object::process::fixed_entries under retyped alone, its plants FIRED. The description above the size stops the boot (FX-0953), its control FIRED. The seal's own read of the tables is B's line, a BACKLOG row.\"",
+                  "value": "\"object::rehome_check's boot-size case: each table its size, the pid table and the quota table filled through their real calls until refused, then one given back taken again; the address waits' bound is unreachable while waiters are tasks. Statically, check-kernel-shape holds user::address_wait::grow built under heap alone and object::process::fixed_entries under retyped alone, its plants FIRED. The description above the size is refused by check-partitions at build and stops the boot (FX-0980), each control FIRED. user::address_wait_check's compared sequence sees the one bucket as the heap's 256 under both memory models. The seal's own read of the tables is B's line, a BACKLOG row.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4171
+                    "line": 4172
                   }
                 },
                 {
@@ -47183,7 +47183,7 @@
                   "value": "\"H.MEM.33\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4172
+                    "line": 4173
                   }
                 },
                 {
@@ -47191,10 +47191,10 @@
                   "qualifiedName": "FerrixObjectRequirements::Pagers::ringZerosTablesAreTheirBootSize",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"object::process::put\", \"object::process::limit_processes\", \"object::process::Live::index\", \"object::process::Live::get\", \"object::process::Live::get_mut\", \"object::process::Live::remove\", \"object::process::Live::iter\", \"object::quota::find_free\", \"user::address_wait::push_within\", \"user::address_wait::take_at\", \"user::address_wait::Bucket::get\", \"user::address_wait::Bucket::iter_mut\")",
+                  "value": "(\"object::process::put\", \"object::process::limit_processes\", \"object::process::Live::index\", \"object::process::Live::get\", \"object::process::Live::get_mut\", \"object::process::Live::remove\", \"object::process::Live::iter\", \"object::process::fixed_entries\", \"object::quota::find_free\", \"user::address_wait::push_within\", \"user::address_wait::take_at\", \"user::address_wait::Bucket::get\", \"user::address_wait::Bucket::iter_mut\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4177
+                    "line": 4179
                   }
                 },
                 {
@@ -47205,7 +47205,7 @@
                   "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4178
+                    "line": 4180
                   }
                 }
               ]
@@ -47218,7 +47218,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4180
+                "line": 4182
               },
               "children": [
                 {
@@ -47229,7 +47229,7 @@
                   "value": "\"A frame a job's heap gives back shall hold none of that job's bytes.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4181
+                    "line": 4183
                   }
                 },
                 {
@@ -47240,7 +47240,7 @@
                   "value": "\"mm::seal::check's large allocation; its control FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4182
+                    "line": 4184
                   }
                 },
                 {
@@ -47251,7 +47251,7 @@
                   "value": "\"H.MEM.32\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4183
+                    "line": 4185
                   }
                 },
                 {
@@ -47262,7 +47262,7 @@
                   "value": "\"mm::ReservedPages::deallocate_pages\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4184
+                    "line": 4186
                   }
                 },
                 {
@@ -47273,7 +47273,7 @@
                   "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4185
+                    "line": 4187
                   }
                 }
               ]
@@ -47286,7 +47286,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4187
+                "line": 4189
               },
               "children": [
                 {
@@ -47297,7 +47297,7 @@
                   "value": "\"A copy into a program's memory whose page could not be faulted in for want of a frame shall answer NoMemory, and one to an address its space never mapped shall answer Fault.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4189
+                    "line": 4191
                   }
                 },
                 {
@@ -47308,7 +47308,7 @@
                   "value": "\"user::edge_check's copy case: every variant of SpaceError and of VmoError answers as the check's copy_answer, which names each with no wildcard, says: NoMemory for want of a frame and Fault otherwise; and a copy to an address never mapped reads Fault; object::quota_check's memory case: a copy as a task of a job at its memory limit, into the first page refused, reads NoMemory.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4193
+                    "line": 4195
                   }
                 },
                 {
@@ -47319,7 +47319,7 @@
                   "value": "\"H.QUOTA.2\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4194
+                    "line": 4196
                   }
                 },
                 {
@@ -47330,7 +47330,7 @@
                   "value": "\"syscall::uaccess::UserError::from\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4195
+                    "line": 4197
                   }
                 }
               ]
@@ -47343,7 +47343,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4197
+                "line": 4199
               },
               "children": [
                 {
@@ -47354,7 +47354,7 @@
                   "value": "\"linuxd's arena shall be sized from a promise taken after the initramfs is given back, as large as the reservation's admission allows then.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4199
+                    "line": 4201
                   }
                 },
                 {
@@ -47365,7 +47365,7 @@
                   "value": "\"mm::seal_check::check_linuxd_promise on every checked retyped boot: the initramfs was not held at the promise, the admission refuses the promise 256 frames more (the check's resolution: frames another processor gives back between the promise and the check can widen what it admits by less than that, so it judges \"not less\"), and the arena is seven eighths of the entry; its control, the promise taken again above the initramfs's return, FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4204
+                    "line": 4206
                   }
                 },
                 {
@@ -47376,7 +47376,7 @@
                   "value": "\"H.MEM.32\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4205
+                    "line": 4207
                   }
                 },
                 {
@@ -47387,7 +47387,7 @@
                   "value": "(\"linuxd_start::size_the_arena\", \"linuxd_start::region_for\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4206
+                    "line": 4208
                   }
                 },
                 {
@@ -47398,7 +47398,7 @@
                   "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4207
+                    "line": 4209
                   }
                 }
               ]
@@ -47411,7 +47411,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4209
+                "line": 4211
               },
               "children": [
                 {
@@ -47422,7 +47422,7 @@
                   "value": "\"devmgr shall be started in drivers.slice, the one job a boot makes of that name, on the kernel's path and on a user kernel's.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4211
+                    "line": 4213
                   }
                 },
                 {
@@ -47433,7 +47433,7 @@
                   "value": "\"syscall::rehome_check::check_one_slice, asked by devmgr_job on every checked boot that starts devmgr: the job is drivers.slice; its control, the kept slice not answered, FIRED on a user kernel on x86_64 KVM and AArch64 TCG (n27b-s2-ctl-x86, n27b-s2-ctl-a64).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4214
+                    "line": 4216
                   }
                 },
                 {
@@ -47444,7 +47444,7 @@
                   "value": "\"H.OBJ.22\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4215
+                    "line": 4217
                   }
                 },
                 {
@@ -47455,7 +47455,7 @@
                   "value": "(\"discovery::devmgr::drivers_job\", \"discovery::devmgr::devmgr_job\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4216
+                    "line": 4218
                   }
                 }
               ]
@@ -47468,7 +47468,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4218
+                "line": 4220
               },
               "children": [
                 {
@@ -47479,7 +47479,7 @@
                   "value": "\"A machine whose linuxd arena would not hold linuxd's root and its programs shall be refused before linuxd runs, with FX-0955 and a line that says the machine is too small for kernel_memory=retyped.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4221
+                    "line": 4223
                   }
                 },
                 {
@@ -47490,7 +47490,7 @@
                   "value": "\"mm::seal_check::check_arena_refusal: an arena one frame under what the root and programs need is refused and one of exactly that is not; and a machine one step under the stated minimum reads the line and ends with FX-0955, on x86_64 and AArch64 (docs/microkernel/K16.md §4.1).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4224
+                    "line": 4226
                   }
                 },
                 {
@@ -47501,7 +47501,7 @@
                   "value": "\"H.MEM.32\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4225
+                    "line": 4227
                   }
                 },
                 {
@@ -47512,7 +47512,7 @@
                   "value": "\"mm::seal::arena_refused\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4226
+                    "line": 4228
                   }
                 },
                 {
@@ -47523,7 +47523,7 @@
                   "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4227
+                    "line": 4229
                   }
                 }
               ]
@@ -47536,7 +47536,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4229
+                "line": 4231
               },
               "children": [
                 {
@@ -47547,7 +47547,7 @@
                   "value": "\"Under kernel_memory=retyped the drivers shall hold one promise, their slice's.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4230
+                    "line": 4232
                   }
                 },
                 {
@@ -47558,7 +47558,7 @@
                   "value": "\"syscall::rehome_check::check_one_promise, asked by devmgr_job on every checked retyped boot: drivers_job made one promise; its control, a second promise made, FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4232
+                    "line": 4234
                   }
                 },
                 {
@@ -47569,7 +47569,7 @@
                   "value": "\"H.MEM.32\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4233
+                    "line": 4235
                   }
                 },
                 {
@@ -47580,7 +47580,7 @@
                   "value": "\"discovery::devmgr::drivers_job\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4234
+                    "line": 4236
                   }
                 },
                 {
@@ -47591,7 +47591,7 @@
                   "value": "\"kernel_memory=retyped\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4235
+                    "line": 4237
                   }
                 }
               ]
@@ -47604,7 +47604,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4237
+                "line": 4239
               },
               "children": [
                 {
@@ -47615,7 +47615,7 @@
                   "value": "\"A further Linux partition shall be started in a job and a region of its own with the FURTHER row alone: no console, no cores, no devmgr channel, and its end shall kill its job and nothing else.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4239
+                    "line": 4241
                   }
                 },
                 {
@@ -47626,7 +47626,7 @@
                   "value": "\"test-partitions: a second partition runs programs and ends, and one that dies at once, the first going on; Rows::judge at its start; the first's end ends the machine, shown.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4241
+                    "line": 4243
                   }
                 },
                 {
@@ -47637,7 +47637,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4242
+                    "line": 4244
                   }
                 },
                 {
@@ -47648,7 +47648,7 @@
                   "value": "\"linuxd_start::start_further\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4243
+                    "line": 4245
                   }
                 }
               ]
@@ -47661,7 +47661,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4245
+                "line": 4247
               },
               "children": [
                 {
@@ -47672,7 +47672,7 @@
                   "value": "\"With more than one Linux partition, each shall be a speculation domain of its own.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4246
+                    "line": 4248
                   }
                 },
                 {
@@ -47683,7 +47683,7 @@
                   "value": "\"test-partitions reads two distinct non-zero domains from the kernel's lines; n10 FIRED.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4247
+                    "line": 4249
                   }
                 },
                 {
@@ -47694,7 +47694,7 @@
                   "value": "\"H.DEV.13\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4248
+                    "line": 4250
                   }
                 },
                 {
@@ -47705,7 +47705,7 @@
                   "value": "\"linuxd_start::start\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4249
+                    "line": 4251
                   }
                 }
               ]
@@ -47718,7 +47718,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4251
+                "line": 4253
               },
               "children": [
                 {
@@ -47729,7 +47729,7 @@
                   "value": "\"A kernel-heap charge refused at a job's memory limit, made for the running task's own job where it may block and not inside a reclaim, shall first reclaim clean cache charged to the job whose limit is full or beneath it and then be tried once more. In linuxd (the lift) such a charge shall be refused without a reclaim, as before: the lift's may_block answers yes whatever is held, so the charge could not tell a context holding a spin lock from one holding none.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4258
+                    "line": 4260
                   }
                 },
                 {
@@ -47740,7 +47740,7 @@
                   "value": "\"test-container's heap-reclaim step: at memory.max beside the cgroup's file cache, 128 opens of memory.events held and a read given, pgscan moving, and the file's own mapping reading as before once its pages were taken down and filled again; with the reclaim taken out the step fails on its refusal sentence (mki3f-c1, FIRED).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4263
+                    "line": 4265
                   }
                 },
                 {
@@ -47751,7 +47751,7 @@
                   "value": "\"H.QUOTA.7\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4264
+                    "line": 4266
                   }
                 },
                 {
@@ -47762,7 +47762,7 @@
                   "value": "(\"object::quota::KernelHeap::charge\", \"object::oom::reclaim_within\", \"sched::heap_charge_may_reclaim\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4266
+                    "line": 4268
                   }
                 }
               ]
@@ -47775,7 +47775,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 4268
+                "line": 4270
               },
               "children": [
                 {
@@ -47786,7 +47786,7 @@
                   "value": "\"A reclaim begun inside a reclaim of the same task shall stop the machine (FX-0973).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4270
+                    "line": 4272
                   }
                 },
                 {
@@ -47797,7 +47797,7 @@
                   "value": "\"With KernelHeap's guard taken out and a refused charge planted at the head of the reclaim, test-container stops as FX-0973, 'a reclaim began inside a reclaim' (mki3f-c2, FIRED).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4273
+                    "line": 4275
                   }
                 },
                 {
@@ -47808,7 +47808,7 @@
                   "value": "\"H.QUOTA.7\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4274
+                    "line": 4276
                   }
                 },
                 {
@@ -47819,7 +47819,7 @@
                   "value": "\"user::cache::reclaim\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 4275
+                    "line": 4277
                   }
                 }
               ]

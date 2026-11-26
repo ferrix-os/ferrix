@@ -4375,10 +4375,25 @@ pub static PARTITION_DESCRIPTION: Explanation = Explanation {
     causes: &[
         "The image was built with a description for another board.",
         "A multi-function device was only partly assigned.",
-        "Under kernel_memory=retyped: its max_processes asks for more than ring 0's fixed tables \
-         hold, or for fewer than the tasks already alive (K16.9).",
     ],
     see: "src/kernel/src/boot_authority.rs; src/lib/proto/partition-desc",
+};
+
+/// K16.9: the description's `max_processes` does not fit ring 0's fixed tables.
+pub static RING_ZERO_TABLES: Explanation = Explanation {
+    code: "FX-0980",
+    title: "the description's max_processes does not fit ring 0's tables",
+    meaning: "Under `kernel_memory=retyped` ring 0's pid table is a static of `FIXED_TASKS` \
+              entries, never grown (`L.object.339`). The description's `max_processes` limits it, \
+              `TASKS_PER_PROCESS` tasks each; a limit past the table, or below the tasks already \
+              alive, cannot be kept, so the boot stops before the manager runs.",
+    causes: &[
+        "The description asks for more processes than `FIXED_TASKS / TASKS_PER_PROCESS`: \
+         `check-partitions.py` refuses it at build, so the image was not built by the tree's \
+         xtask.",
+        "A second limit was set, or more tasks were alive before the manager than the limit.",
+    ],
+    see: "src/kernel/src/object/process.rs limit_processes; docs/microkernel/K16.md §3",
 };
 
 /// `docs/microkernel/BOOT-AUTHORITY.md` §4: the manager ended.
@@ -4627,6 +4642,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &RSS_COUNT_BROKEN,
     &CACHE_COUNT_BROKEN,
     &ANON_MERGE_BROKEN,
+    &RING_ZERO_TABLES,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,
