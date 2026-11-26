@@ -341,7 +341,11 @@ fn spawn(
 fn serve_http(listener: &TcpListener, stop: &AtomicBool, repository: &Path) {
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
-            Ok((stream, _)) => answer_http(stream, repository),
+            Ok((stream, peer)) => {
+                println!("  trace-http: {:?} accepted from {peer}", trace_now());
+                answer_http(stream, repository);
+                println!("  trace-http: {:?} answered", trace_now());
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(TURN);
             }
@@ -371,6 +375,12 @@ fn answer_http(mut stream: TcpStream, repository: &Path) {
             _ => break,
         }
     }
+    println!(
+        "  trace-http: {:?} request of {} bytes, path {:?}",
+        trace_now(),
+        request.len(),
+        path_of(&request)
+    );
     let body = match path_of(&request) {
         Some(path) if path == HELLO_PATH => Some(format!("{HELLO_BODY}\n").into_bytes()),
         Some(path) if path == BIG_PATH => Some(big_body()),
@@ -398,6 +408,13 @@ fn answer_http(mut stream: TcpStream, repository: &Path) {
     let _ = stream.shutdown(std::net::Shutdown::Write);
 }
 
+/// TRACE ONLY (sebastian-27c/paced, never for develop): seconds since the epoch.
+fn trace_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |since| since.as_secs_f64())
+}
+
 /// Answer with `body` at [`PACED_CHUNK`] every [`PACED_REST`], so that the
 /// transfer lasts long enough for something to happen in its middle.
 fn write_paced(stream: &mut TcpStream, body: &[u8]) {
@@ -408,10 +425,13 @@ fn write_paced(stream: &mut TcpStream, body: &[u8]) {
     if stream.write_all(head.as_bytes()).is_err() {
         return;
     }
+    let mut sent = 0;
     for chunk in body.chunks(PACED_CHUNK) {
-        if stream.write_all(chunk).is_err() {
+        if let Err(error) = stream.write_all(chunk) {
+            println!("  trace-http: {:?} paced: {sent} bytes sent, then {error}", trace_now());
             return;
         }
+        sent += chunk.len();
         std::thread::sleep(PACED_REST);
     }
     let _ = stream.flush();
@@ -824,13 +844,19 @@ fn restart_command(http: u16, udp: u16) -> Command {
             "-c".to_owned(),
             format!(
                 "rm -f /tmp/paced; \
+                 echo trace-guest start $(cut -d' ' -f1 /proc/uptime); head -3 /proc/meminfo; \
                  (timeout 60 wget -q -O /tmp/paced http://10.0.2.2:{http}{PACED_PATH}; \
                  echo \"paced-fetch $?\" > /tmp/paced.status) & \
                  n=0; while [ $n -lt 300 ] && \
                  [ \"$(wc -c < /tmp/paced 2>/dev/null || echo 0)\" -lt {PACED_BEFORE_FAULT} ]; \
-                 do sleep 0.1; n=$((n + 1)); done; \
+                 do sleep 0.1; n=$((n + 1)); \
+                 if [ $((n % 10)) = 0 ]; then echo trace-guest n=$n $(cut -d' ' -f1 /proc/uptime); \
+                 awk 'NR>1 {{print \"trace-tcp\", $2, $3, $4, $5}}' /proc/net/tcp; fi; done; \
+                 echo trace-guest loop-end n=$n; head -3 /proc/meminfo; \
                  echo {FAULT_MARKER} | nc -u -w 1 10.0.2.2 {udp} > /dev/null 2>&1; \
-                 wait; cat /tmp/paced.status; cksum < /tmp/paced"
+                 wait; cat /tmp/paced.status; cksum < /tmp/paced; \
+                 echo trace-guest end $(cut -d' ' -f1 /proc/uptime); head -3 /proc/meminfo; \
+                 awk 'NR>1 {{print \"trace-tcp\", $2, $3, $4, $5}}' /proc/net/tcp"
             ),
         ]),
         status: 0,
