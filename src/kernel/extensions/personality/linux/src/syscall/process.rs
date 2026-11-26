@@ -2800,6 +2800,20 @@ impl PreparedStart {
         claim.spent = true;
         task
     }
+
+    /// As [`PreparedStart::launch`], but a launch the kernel below refuses is answered and the
+    /// claim given back: in linuxd a process's first task starts a ring-0 process of its own,
+    /// which ring 0 may refuse (its pid table at the description's limit, K16.9; no memory).
+    /// A fork's child must hear it as `EAGAIN`, not be counted started and never run.
+    fn try_launch(self) -> Result<Arc<Task>, &'static str> {
+        let PreparedStart { task, mut claim } = self;
+        let posting = sched::work::posting();
+        let task = task.try_launch()?;
+        tell_a_new_task(&claim.process, &task);
+        drop(posting);
+        claim.spent = true;
+        Ok(task)
+    }
 }
 
 impl Drop for StartClaim {
@@ -2824,7 +2838,7 @@ pub(crate) fn start_forked(
     state: sched::BoxedUserState,
 ) -> Result<Arc<Task>, &'static str> {
     let claim = take_claim(thread.process())?;
-    Ok(claim.prepare_thread(thread, None, Some(state))?.launch())
+    claim.prepare_thread(thread, None, Some(state))?.try_launch()
 }
 
 /// Run a thread `clone` made in a process already running: it resumes from the

@@ -1599,6 +1599,16 @@ impl PreparedTask {
         enqueue(&self.task, self.cpu, self.queue);
         Arc::clone(&self.task)
     }
+
+    /// As [`PreparedTask::launch`], which cannot fail here: one of a pair with linuxd's, whose
+    /// launch starts a ring-0 process ring 0 may refuse (K16.9).
+    ///
+    /// # Errors
+    ///
+    /// None in this kernel.
+    pub fn try_launch(self) -> Result<Arc<Task>, &'static str> {
+        Ok(self.launch())
+    }
 }
 
 impl Drop for PreparedTask {

@@ -322,13 +322,21 @@ impl PreparedTask {
         &self.task
     }
     pub fn launch(self) -> Arc<Task> {
+        let task = Arc::clone(&self.task);
+        let _ = self.try_launch();
+        task
+    }
+    /// Launch it, answering a refusal of the kernel below: its thread is then gone, never
+    /// started, and the caller hears why (a fork's `EAGAIN`, K16.9).
+    pub fn try_launch(self) -> Result<Arc<Task>, &'static str> {
         if let Err(why) = launch(&self.task) {
             crate::println!("linuxd: a thread did not start: {why}");
             if let Some(thread) = self.task.thread() {
                 thread.process().thread_gone(false);
             }
+            return Err(why);
         }
-        self.task
+        Ok(self.task)
     }
 }
 /// How a wake is counted; the kernel's scheduler is what acts on it.
